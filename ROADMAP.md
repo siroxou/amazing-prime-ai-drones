@@ -1,99 +1,100 @@
 # Roadmap
 
-The end goal is a fleet of 10 delivery drones that ride on a delivery truck, launch while it drives its route, each drop one parcel at a house or apartment balcony, and fly back to land on the truck wherever it has got to by then.
+Flying a drone to a point is solved. The hard part, and the point of this project, is the whole operation: a city's worth of random parcels every day, a fleet of autonomous trucks each carrying 10 drones, and an optimiser that decides everything in between:
 
-Control is split in two:
+- which truck covers which zone, in what order, and the route it drives
+- where along that route each truck launches and recovers drones
+- which parcels go by drone, which drone takes which parcel, and when
+- the drop spot and release height at each address: yard, porch or balcony, lowered or dropped
+- 3D flight paths around power lines, trees and buildings
+- all of it adjusted for the day's weather and each parcel's size, weight and fragility
 
-- **Fleet controller** (on the truck, one per fleet): decides which drone takes which parcel, when it launches, which altitude band and corridor it flies in, and when and where it should meet the truck again. It plans with the truck's route and the parcel list.
-- **Drone policy** (shared, one copy per drone): flies the drone. It takes the fleet controller's goal plus the drone's own sensors and handles everything local: obstacles at the drop point, wind, other drones close by, the drop itself and the landing on a moving truck.
+The question: **across random days, does the autonomous fleet deliver faster than human drivers?** "Faster" is measured on the same days, same parcels and same city, against a human baseline that is deliberately generous (see Phase 2). A sim result isn't proof about real streets, so every number is reported with its assumptions.
 
 Each phase ends with an exit check that has to pass before the next one starts.
+
+## Design decisions
+
+- **Two levels of fidelity.** Optimising a whole day for several trucks and dozens of drones needs thousands of simulated days. A fast macro sim (road graph travel times, drone time and energy from a cost model) is where the optimiser trains and is scored. A slower micro sim (3D drones, trucks in traffic) checks that the macro plans actually hold, and calibrates the cost model.
+- **Classical where it's solved, learned where it pays.** Drone flight uses a hand-written flight stack (cascaded PID, then a geometric controller if needed). Learning goes into planning, and a learned planner is kept only if it beats the classical solver on held-out days.
+- **Honest baselines first.** No learned result counts until the human baseline and a classical solver are in place and benchmarked.
+- **Settings that carry over from the car project:** for any PPO training, 12 parallel envs, VecNormalize rewards, target KL 0.02, tanh MLP, lower starting action noise, and at least three seeds per result.
 
 ## Phase 0: Fork ✓
 
 - [x] Copy the reusable parts of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized): procedural roads, the vehicle model (now the truck and road traffic), IDM traffic, numpy policy runner and the PPO-to-numpy export
-- [x] Remove the car-only parts: car sensors and observation layout, driving env, lane follower, hazards, evaluation levels, the browser viewer and Pages deploy, the MetaDrive research track, trained car models and results
+- [x] Remove the car-only parts: car sensors and observation layout, driving env, lane follower, hazards, evaluation levels, the browser viewer, the MetaDrive research track, trained models and results
 - [x] README and this roadmap
 
 **Exit:** `pytest tests` passes on a fresh install.
 
-## Phase 1: 3D world
+## Phase 1: City, parcels and weather
 
-- [ ] Neighbourhood generator on top of the existing roads: houses as boxes with roof heights, front and back yards, trees (cylinders with a canopy), garden fences, street lights and power lines along the road
-- [ ] Apartment blocks with balconies on several floors; each balcony is a drop point with a railing and an overhang above it
-- [ ] Drop points per house: a clear spot in the yard, or a balcony. Some are partly blocked (a tree over the yard, a washing line, a parked car in the drive)
-- [ ] The truck gets its own body (box van, about 7 m long) and a roof dock with room for 10 drones
-- [ ] Wind: a steady wind per episode plus gusts, stronger above roof height and in the gaps between apartment blocks
-- [ ] 3D raycaster against boxes, cylinders, wires and the ground, vectorised in numpy
-- [ ] Tests: raycasts hit hand-built boxes and cylinders at the right distance, every drop point is reachable from above, same seed gives the same neighbourhood
+- [ ] City generator: a road graph with speed limits and traffic levels per street, split into delivery zones, with a depot
+- [ ] Addresses: houses and apartment blocks. Each address gets its candidate drop spots (front yard, back yard, porch, balcony per floor) with how open each one is from above and what's near it (trees, power lines, overhangs)
+- [ ] Parcels: a random set per day, each with an address, size, weight and fragility, drawn from adjustable distributions
+- [ ] Weather per day, changing through the day: wind speed and direction with gusts, rain, temperature (which changes battery capacity)
+- [ ] Day files: every random day is saved by seed, with a fixed held-out set for benchmarks
 
-**Exit:** a neighbourhood with 10 drop points builds in under 50 ms, and a 64-ray 3D cast runs at least 5,000 times a second.
+**Exit:** a city with 2,000 addresses and a 500-parcel day builds in under a second, and the same seed gives the same day.
 
-## Phase 2: Drone dynamics
+## Phase 2: Baselines
 
-- [ ] Quadrotor rigid body: mass, inertia, four rotors with thrust and drag torque, motor lag, body drag, ground effect near the dock and the ground
-- [ ] Action: collective thrust plus body rates, all in [-1, 1]. Low-level rate control sits inside the sim, like a flight controller would
-- [ ] Payload: one parcel with its own mass, released at the drop point, which changes the drone's mass and centre of gravity mid-flight
-- [ ] Battery: energy use from thrust, so a heavy parcel, a climb or a headwind cost more. Voltage sag near empty
-- [ ] Collision: drone against buildings, trees, wires, ground, the truck and other drones
-- [ ] Reference autopilot: hand-written cascaded PID (position, velocity, attitude) that reads the true state. It's the yardstick, like the lane follower was for the car
-- [ ] Tests: hover holds height, the drone falls when thrust is cut, a step in body rate gives the expected attitude, battery drains faster when loaded
+- [ ] **Human drivers:** one van per zone, a route planned by OR-Tools (so the human gets a good route for free), driving at the speed limit with traffic, and a service time per stop for parking, walking to the door and back. Service time is a parameter with a range, and results are reported against the fast end of it, so the comparison is against a good driver, not an average one
+- [ ] **Autonomous trucks, no drones:** same routes, same driving, but parcels are handed out at the kerb. Shows how much of any gain comes from the drones
+- [ ] **Classical truck + drone solver:** zone assignment, truck routing and drone sortie scheduling with OR-Tools plus construction heuristics, using the drone cost model from Phase 3 (start with a simple fixed-speed version)
+- [ ] Metrics per day: time until the last parcel is delivered, parcels per hour per truck, distance driven, drone energy, parcels that couldn't go by drone and why
 
-**Exit:** at least 3,000 drone-steps/s at 50 Hz for one drone in one process, and the reference autopilot holds a hover within 0.2 m in light wind.
+**Exit:** all three baselines run on the full held-out set in under 10 minutes on a laptop, with results in `results/baselines.md`.
 
-## Phase 3: Sensors
+## Phase 3: Drone cost model and drop planning
 
-The drone gets every sensor a real delivery drone could reasonably carry. There's no sensor switching this time; the question is whether it can fly well with all of them, including their noise and failures.
+- [ ] 3D path planner over each neighbourhood: shortest safe path between launch, drop and recovery points, keeping clear of power lines, trees and buildings, with separate climb, cruise and descent legs
+- [ ] Time and energy per sortie from distance, climb, payload weight, parcel size (drag) and wind along the path. Calibrated against the micro sim in Phase 5
+- [ ] Drop planning per parcel: pick the drop spot and release height. Lower and slower for fragile parcels and gusty wind, a winch lowering for balconies and tight yards, and the wind drift on release accounted for. Some drop spots get ruled out in strong wind
+- [ ] Payload limits: parcels too big or heavy for a drone stay on the truck and are reported separately
 
-- [ ] Fixed observation layout, normalised to [0, 1]
-- [ ] Noise, bias, latency and dropout for each sensor, with settings per episode
-- [ ] Debug geometry for each sensor so renders can show what it sees
-- [ ] Tests: every sensor stays in range under any settings, observation shape never changes, GPS gets worse next to tall buildings, the beacon range matches true distance on average
+**Exit:** the classical solver from Phase 2 using this cost model beats the human baseline on the held-out days, or the gap is written up honestly.
 
-The sensors are listed in the README.
+## Phase 4: Learned optimiser
 
-**Exit:** the reference autopilot, switched to reading only the sensors instead of the true state, still flies a mission it completes with the true state.
+- [ ] Planning env over the macro sim: the optimiser makes the dispatch, routing and sortie decisions as the day goes, and gets scored on delivery time
+- [ ] Start with learned improvements to the classical solver (for example, learning which parcels go by drone, or where launch points go), then try a full learned planner, such as an attention-based routing model trained with RL
+- [ ] Re-planning during the day: traffic jams, a drone that comes back late, a wind change
+- [ ] Benchmark against the classical solver and the human baseline on held-out days, three seeds
 
-## Phase 4: Single-drone mission
+**Exit:** the learned optimiser beats the classical solver on held-out days, averaged over three seeds. If it doesn't, the classical solver stays as the main result and this is written up.
 
-- [ ] Gymnasium env for one drone: launch from the moving truck, fly to an assigned drop point, release the parcel, fly back and land on the moving truck
-- [ ] Metrics: `delivered`, `docked`, `crash`, `battery_out`, `lost` (out of range of the truck), mission time, energy used
-- [ ] The reference autopilot completes missions, with a fixed set of held-out neighbourhoods for benchmarking
+## Phase 5: Micro sim check
 
-**Exit:** the reference autopilot delivers and docks on at least 95% of held-out missions in light wind.
+- [ ] 3D neighbourhood from the city generator: houses, yards, trees, fences, power lines, apartment blocks with balconies, wind with gusts
+- [ ] Quadrotor model: four rotors with motor lag, drag, ground effect, a parcel that changes the mass when released, battery that drains with thrust
+- [ ] Hand-written flight stack following the planned 3D paths, including the drop and the landing on a moving truck's roof dock
+- [ ] Sensors with noise, bias, latency and dropout (the full list is in the README)
+- [ ] Replay planned days from the macro sim and compare: how close are real sortie times and energy to the cost model, and how many sorties fail
 
-## Phase 5: Shared drone policy
+**Exit:** micro sim sortie times are within 10% of the cost model on average, and fewer than 2% of planned sorties fail.
 
-- [ ] PPO with the settings that worked on the car: 12 parallel envs, VecNormalize rewards, target KL 0.02, tanh MLP, lower starting action noise
-- [ ] Curriculum: hover, then waypoints, then a drop on an open yard, then a static truck landing, then a moving truck, then balconies and blocked yards, then wind
-- [ ] Export to numpy with `train/export.py`, so evaluation and rendering don't need torch
-- [ ] Benchmark on held-out neighbourhoods, three seeds per setup. Single runs vary a lot, so no result counts from one run
+## Phase 6: Autonomous trucks
 
-**Exit:** the trained policy delivers and docks on at least 85% of held-out single-drone missions, averaged over three seeds.
+- [ ] Truck driving in the micro sim: lane following, junctions, traffic, pulling over at launch points. The lane follower and driving work from self-driving-optimized are the starting point
+- [ ] Driving the same routes as the human baseline, the autonomous truck must be no slower between stops
+- [ ] Launch and recovery while moving, and pulling over when the plan needs a stationary recovery
 
-## Phase 6: Fleet controller
-
-- [ ] Fleet env: one truck, 10 drones, 10 parcels per round, all drones running the shared policy
-- [ ] Fleet comms in the drone observation: positions and planned paths of nearby drones, with latency and dropout
-- [ ] Hand-written fleet controller first: assign parcels to drones by distance along the route, stagger launches, give each drone an altitude band, plan each rendezvous from the truck's route and the drone's battery, queue landings on the dock
-- [ ] Replanning when the truck is held up in traffic or a drone is late
-- [ ] Metrics: parcels per hour, all delivered, all docked, closest approach between drones, dock wait time, energy per parcel
-- [ ] Then try a learned fleet controller and keep it only if it beats the hand-written one on the benchmark
-
-**Exit:** a full round of 10 parcels with no drone-to-drone collisions on at least 90% of held-out rounds.
+**Exit:** on replayed held-out days, the full autonomous system (trucks driving themselves, drones flying themselves) still beats the human baseline.
 
 ## Phase 7: Hardening
 
-- [ ] Stress tests: strong gusts, GPS loss in apartment canyons, comms dropout, a beacon failure, a drone that loses a motor and has to land safely
-- [ ] Battery reserve rules: a drone that can't make the rendezvous diverts to a safe landing spot and the fleet controller sends the truck back
-- [ ] Held-out benchmark across all of the above, published in `results/`
+- [ ] Bad days: strong wind, rain, a no-fly window, a truck breakdown, a drone that loses a motor, GPS loss between tall buildings
+- [ ] Safe fallbacks: a drone that can't make its recovery lands somewhere safe and gets collected later, and the plan adjusts
+- [ ] Results across the whole held-out set, including the days where humans win
 
-**Exit:** no stress test makes the fleet worse than "drone lands safely and is recovered later".
+**Exit:** no bad-day scenario ends in a crash into people or property in the micro sim, and the fleet's delivery time is reported for every scenario.
 
 ## Phase 8: Write-up
 
-- [ ] Renders and GIFs with matplotlib for the README: a full fleet round from above and a chase view of one delivery
-- [ ] Docs: world, dynamics, sensors, training, fleet controller, results
-- [ ] Honest results tables, including what still fails
+- [ ] Renders with matplotlib: a full day over the city map, and a 3D view of one neighbourhood's sorties
+- [ ] Docs: city and parcels, baselines, cost model, optimiser, micro sim, results
+- [ ] Results tables with every assumption listed, especially the human service time
 
-**Exit:** someone new can install, run the tests, train a policy and reproduce the published numbers from the docs alone.
+**Exit:** someone new can install, run the tests, and reproduce the published numbers from the docs alone.
