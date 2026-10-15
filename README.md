@@ -1,10 +1,12 @@
 # Amazing Prime AI Drones
 
-Can a fleet of autonomous trucks, each launching 10 delivery drones, deliver a city's parcels faster than human drivers?
+Can a fleet of autonomous trucks, each launching 10 delivery drones, deliver a city's parcels faster than Amazon does today?
 
 Flying one drone to one point is solved. This project is about the operation around it: every day brings a random set of parcels across the city, and an optimiser has to decide which truck covers which zone, the route each truck drives, where it launches and recovers its drones, which drone takes which parcel, where and from what height each parcel is put down, and the 3D path each drone flies around power lines, trees and buildings. All of that changes with the weather and with each parcel's size, weight and fragility.
 
-It's scored against human van drivers on the same days, the same parcels and the same city. The human baseline is deliberately generous: a good route for free and a fast service time at each stop.
+It's scored against a model of Amazon's current last mile: parcels arriving at a delivery station, Delivery Service Partner drivers in vans, and Prime Air drones flying from fixed sites. Both systems start from the same delivery station, with the same days, parcels and city. The Amazon model is built only from public figures and is deliberately generous: good routes for free and the fast end of every range. How it's built, and where each number comes from, is in [docs/amazon-baseline.md](docs/amazon-baseline.md).
+
+This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
@@ -81,6 +83,7 @@ sim/traffic.py       IDM traffic and parked cars around the truck
 sim/policy.py        runs an exported policy with plain numpy
 train/export.py      exports a trained PPO model to .npz for sim/policy.py
 tests/               tests
+docs/amazon-baseline.md  how Amazon's current last mile is modelled, with sources
 ROADMAP.md           phases and exit criteria
 ```
 
