@@ -16,7 +16,8 @@ This started as a fork of [self-driving-optimized](https://github.com/siroxou/se
 |---|---|---|
 | Zones per truck, and their order | optimiser | parcel locations, traffic, depot |
 | Truck route, launch and recovery points | optimiser | road graph, traffic, drone range in today's wind |
-| Drone or truck for each parcel | optimiser | size, weight, fragility, drop spot, weather |
+| Drone or truck locker for each parcel | optimiser | size, weight, fragility, drop spot, weather |
+| Locker pickup points and how long to wait | optimiser | where locker recipients live, legal places to stop |
 | Which drone, and when it launches | optimiser | battery, distance, other sorties, the truck's route |
 | Drop spot and release height | drop planner | yard, porch or balcony, obstacles, wind drift, fragility |
 | 3D flight path | path planner | power lines, trees, buildings, wind |
@@ -37,6 +38,8 @@ Two sims share the same city:
 3. At the address it goes to the chosen drop spot, comes down to the planned height, and releases or lowers the parcel.
 4. It flies to its recovery point and lands on the truck, which has kept driving.
 5. If it's running low on battery or loses the truck, it lands somewhere safe instead and the plan adjusts.
+
+Parcels too big or heavy for a drone ride in a locker on the truck. The truck parks at a pickup point near those addresses, the recipients are told it's there, and they walk over and collect them while the drones keep working.
 
 ## Sensors
 

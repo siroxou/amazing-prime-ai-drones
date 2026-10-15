@@ -3,7 +3,7 @@
 Flying a drone to a point is solved. The hard part, and the point of this project, is the whole operation: a city's worth of random parcels every day, a fleet of autonomous trucks each carrying 10 drones, and an optimiser that decides everything in between:
 
 - which truck covers which zone, in what order, and the route it drives
-- where along that route each truck launches and recovers drones
+- where along that route each truck launches and recovers drones, and where it parks for locker pickups
 - which parcels go by drone, which drone takes which parcel, and when
 - the drop spot and release height at each address: yard, porch or balcony, lowered or dropped
 - 3D flight paths around power lines, trees and buildings
@@ -33,6 +33,7 @@ Each phase ends with an exit check that has to pass before the next one starts.
 - [ ] City generator: a road graph with speed limits and traffic levels per street, split into delivery zones, with a depot
 - [ ] Addresses: houses and apartment blocks. Each address gets its candidate drop spots (front yard, back yard, porch, balcony per floor) with how open each one is from above and what's near it (trees, power lines, overhangs)
 - [ ] Parcels: a random set per day, each with an address, size, weight and fragility, drawn from adjustable distributions
+- [ ] Recipients: for locker parcels, how far each recipient will walk to the truck and how quickly they turn up after being told it's there, both as adjustable distributions
 - [ ] Weather per day, changing through the day: wind speed and direction with gusts, rain, temperature (which changes battery capacity)
 - [ ] Day files: every random day is saved by seed, with a fixed held-out set for benchmarks
 
@@ -41,9 +42,9 @@ Each phase ends with an exit check that has to pass before the next one starts.
 ## Phase 2: Baselines
 
 - [ ] **Human drivers:** one van per zone, a route planned by OR-Tools (so the human gets a good route for free), driving at the speed limit with traffic, and a service time per stop for parking, walking to the door and back. Service time is a parameter with a range, and results are reported against the fast end of it, so the comparison is against a good driver, not an average one
-- [ ] **Autonomous trucks, no drones:** same routes, same driving, but parcels are handed out at the kerb. Shows how much of any gain comes from the drones
+- [ ] **Autonomous trucks, no drones:** every parcel goes in the truck's locker and recipients collect it at stops along the route. Shows how much of any gain comes from the drones
 - [ ] **Classical truck + drone solver:** zone assignment, truck routing and drone sortie scheduling with OR-Tools plus construction heuristics, using the drone cost model from Phase 3 (start with a simple fixed-speed version)
-- [ ] Metrics per day: time until the last parcel is delivered, parcels per hour per truck, distance driven, drone energy, parcels that couldn't go by drone and why
+- [ ] Metrics per day: time until the last parcel is delivered, parcels per hour per truck, distance driven, drone energy, parcels that went by locker and why, and how long locker recipients waited and walked
 
 **Exit:** all three baselines run on the full held-out set in under 10 minutes on a laptop, with results in `results/baselines.md`.
 
@@ -52,7 +53,16 @@ Each phase ends with an exit check that has to pass before the next one starts.
 - [ ] 3D path planner over each neighbourhood: shortest safe path between launch, drop and recovery points, keeping clear of power lines, trees and buildings, with separate climb, cruise and descent legs
 - [ ] Time and energy per sortie from distance, climb, payload weight, parcel size (drag) and wind along the path. Calibrated against the micro sim in Phase 5
 - [ ] Drop planning per parcel: pick the drop spot and release height. Lower and slower for fragile parcels and gusty wind, a winch lowering for balconies and tight yards, and the wind drift on release accounted for. Some drop spots get ruled out in strong wind
-- [ ] Payload limits: parcels too big or heavy for a drone stay on the truck and are reported separately
+- [ ] Payload limits: parcels too big or heavy for a drone go in the truck's locker instead
+
+## Phase 3b: Truck locker
+
+- [ ] Locker on each truck for parcels a drone can't carry. The truck parks at a pickup point, recipients nearby are told when it will be there, and each one walks over and opens their compartment
+- [ ] The optimiser picks pickup points (a legal place to stop, within walking distance of as many locker recipients as possible) and how long to wait at each. Drones keep launching and landing while the truck is parked
+- [ ] A locker parcel counts as delivered when it's collected. Uncollected parcels after the wait go back to the depot and count against the fleet
+- [ ] Locker capacity per truck limits how many oversized parcels a truck can take, which feeds into zone assignment
+
+**Exit:** on held-out days, every oversized parcel is either collected or reported as returned, and the waiting time at pickup points is included in the fleet's delivery time.
 
 **Exit:** the classical solver from Phase 2 using this cost model beats the human baseline on the held-out days, or the gap is written up honestly.
 
