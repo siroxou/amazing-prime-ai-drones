@@ -28,17 +28,22 @@ Each phase ends with an exit check that has to pass before the next one starts.
 
 **Exit:** `pytest tests` passes on a fresh install.
 
-## Phase 1: City, parcels and weather
+## Phase 1: City, parcels and weather ← in progress
 
-- [ ] City generator: a road graph with speed limits and traffic levels per street, split into delivery zones, with a delivery station as the depot. Upstream of it (fulfilment centre, sort centre) is the same for both systems, so parcels simply arrive at the station each morning
-- [ ] Density presets for suburb, dense suburb and city centre, so stops per route can be compared with what DSP drivers report
-- [ ] Addresses: houses and apartment blocks. Each address gets its candidate drop spots (front yard, back yard, porch, balcony per floor) with how open each one is from above and what's near it (trees, power lines, overhangs)
+- [x] City generator: a street grid as a road graph with speed limits, arterial roads bounding 9 ZIP codes, each ZIP split into 4 delivery zones, and a distribution centre (delivery station) west of the city with 10 truck bays and an access road. Upstream of it (fulfilment centre, sort centre) is the same for both systems, so parcels simply arrive at the station each morning (`sim/city.py`)
+- [ ] Traffic levels per street
+- [x] Districts: apartment blocks in the centre, small lots around it, suburban lots further out, so stops per route can be compared with what DSP drivers report
+- [x] Addresses: houses and apartment flats (one per balcony). Each address gets its candidate drop spots (porch, front yard, back yard, or its balcony) with the clear height above each one. Yards have trees and fences; streets outside the centre have poles with a power line and a lower cable line
+- [x] 3D obstacles (boxes, upright cylinders, wires) with raycasts and contact checks, using a coarse grid so queries only look nearby (`sim/geometry.py`)
+- [x] Pictures of the city for the README (`sim/render.py`)
 - [ ] Parcels: a random set per day, each with an address, size, weight and fragility, drawn from adjustable distributions
 - [ ] Recipients: for locker parcels, how far each recipient will walk to the truck and how quickly they turn up after being told it's there, both as adjustable distributions
 - [ ] Weather per day, changing through the day: wind speed and direction with gusts, rain, temperature (which changes battery capacity)
 - [ ] Day files: every random day is saved by seed, with a fixed held-out set for benchmarks
 
 **Exit:** a city with 2,000 addresses and a 500-parcel day builds in under a second, and the same seed gives the same day.
+
+So far, measured with `python -m sim.city` on an Apple Silicon laptop: the default city (2,058 addresses, 4,622 drop spots, about 14,000 obstacles) builds in **178 ms**, and a 64-ray, 40 m raycast runs **3,271 times a second**. Parcels and weather aren't in yet.
 
 ## Phase 2: Baselines
 
@@ -80,7 +85,8 @@ Each phase ends with an exit check that has to pass before the next one starts.
 
 ## Phase 5: Micro sim check
 
-- [ ] 3D neighbourhood from the city generator: houses, yards, trees, fences, power lines, apartment blocks with balconies, wind with gusts
+- [x] 3D neighbourhood from the city generator: houses, yards, trees, fences, power lines, apartment blocks with balconies (built in Phase 1)
+- [ ] Wind with gusts
 - [ ] Quadrotor model: four rotors with motor lag, drag, ground effect, a parcel that changes the mass when released, battery that drains with thrust
 - [ ] Hand-written flight stack following the planned 3D paths, including the drop and the landing on a moving truck's roof dock
 - [ ] Sensors with noise, bias, latency and dropout (the full list is in the README)
