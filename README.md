@@ -10,37 +10,55 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 1 is in progress. The 3D city is in: streets, ZIP codes, delivery zones, the distribution centre, houses, apartment blocks, trees, fences and power lines. Parcels, weather, baselines, the optimiser and the drone sim come next, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 1 is in progress. The 3D city is in: streets, ZIP codes, delivery zones, the distribution centre, hills, houses, apartment blocks, hazards and no-fly airspace. Parcels, weather, baselines, the optimiser and the drone sim come next, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
-![Top-down map: 9 ZIP codes outlined, each split into 4 shaded zones, with the distribution centre to the west](docs/images/city-map.png)
+![Top-down map: 9 ZIP codes outlined, each split into 4 shaded zones, curving streets and cul-de-sacs around a grid centre, the distribution centre to the west, no-fly zones in red](docs/images/city-map.png)
 
-Each seed gives a different city. The default is a 12 x 12 grid of blocks, about 1.5 x 1.2 km:
+Each seed gives a different city, about 1.5 x 1.2 km:
 
-- **ZIP codes and zones:** arterial roads every 4 blocks bound 9 ZIP codes. Each ZIP splits into 4 delivery zones of 2 x 2 blocks, and every address belongs to one zone and one ZIP.
+- **ZIP codes and zones:** straight arterial roads mark out 9 ZIP codes. Each ZIP splits into 4 delivery zones (its quarters), and every address belongs to one zone and one ZIP.
+- **Streets:** the middle ZIP keeps a street grid. The ZIPs around it get two curving streets across each one, curving links between them and out to the arterials, and cul-de-sacs with turning circles off all of those. Houses face whatever street they're on.
 - **Distribution centre:** a warehouse west of the city with 10 truck bays in its yard and an access road onto the middle arterial. Trucks start here.
 - **Districts:** apartment blocks in the middle, with a balcony per flat on the street side. Small lots around them, bigger suburban lots further out.
 - **Houses:** each lot has a house, a front and back yard, sometimes trees and fences. Every address has drop spots (porch, front yard, back yard, or its balcony) and the sim knows the clear height above each one, so a yard under a tree or a balcony under the one above is known in advance.
-- **Power lines:** poles down one side of every street outside the centre, carrying a power line at 9.5 m and a cable line at 6 m, including across junctions.
+- **Hills:** broad hills and dips, about 60 m from the lowest point to the highest and up to 15% steep. Everything stands on the ground, and apartment floors are levelled from the high side so balconies clear the slope.
 
-| Edge of the centre | Suburbs |
+### Hazards and airspace
+
+| Hazard | What's there |
 |---|---|
-| ![3D view of apartment blocks with balconies next to small lots with trees and fences](docs/images/city-zone.png) | ![3D view of suburban lots with houses, yards, trees, fences and power lines](docs/images/city-suburb.png) |
+| Power lines | poles down one side of every street outside the centre, with a power line at 9.5 m and a cable line at 6 m |
+| High-voltage line | lattice pylons about 36 m tall across one corner of the city, 5 conductors from 25 to 36 m, with a 40 m strip under it kept clear of houses |
+| Cell towers | two masts of 45–60 m, each held up by six guy wires anchored out to about half its height |
+| Construction cranes | four building sites; on any given day most have a tower crane up, with its jib pointing a different way and its hook hanging at a different height. `City(seed, day=...)` changes only these and the stadium |
+| Schools | no drones below 60 m over the school and its grounds, 7:30 to 16:00 |
+| Hospital | no drones below 150 m within 150 m of the roof helipad, at any time |
+| Stadium | no drones below 300 m within 300 m, 17:00 to 23:00 on event days |
+| Airfield | east of the city: stay below 30 m within 1.2 km, and never over the runway or its approaches |
 
-![3D overview of the whole city with the distribution centre on the left](docs/images/city-overview.png)
+Airspace heights are above the ground under the drone. `city.airspace.blocked(points, hour)` says which zone, if any, each point is in.
 
-The default city has 2,058 addresses, 4,622 drop spots and about 14,000 obstacles, and builds in under 0.2 s. Drones see it through raycasts, about 3,300 casts of 64 rays a second on a laptop.
+| Edge of the centre | A suburban zone with a crane, pylons and power lines |
+|---|---|
+| ![3D view of apartment blocks with balconies next to small lots with trees and fences, on a slope](docs/images/city-centre.png) | ![3D view of suburban houses on curving streets with a tower crane, high-voltage pylons and power lines](docs/images/city-suburb.png) |
+
+![3D overview of the whole city on its hills, with the distribution centre on the left, the stadium, schools, hospital, cranes and the high-voltage line](docs/images/city-overview.png)
+
+The default city (seed 0) has 2,038 addresses, 4,252 drop spots and about 12,000 obstacles, and builds in about 0.7 s. Other seeds give 1,700 to 2,000 addresses. Drones see the city through raycasts: about 1,900 casts of 64 rays a second on a laptop, against buildings, trees, wires and the hills.
 
 ```python
 from sim.city import City
 
-city = City(seed=0)
+city = City(seed=0, day=0)
 print(city.summary())
 city.zip_codes[city.address_zip[0]], city.address_zone[0]   # ZIP code and zone of address 0
 city.spot_pos[city.spot_address == 0]                      # its drop spots
+city.terrain.height(x, y)                                  # ground height
 city.obstacles.cast(origin, directions, 40.0)              # distances and what each ray hit
 city.obstacles.touching(point, 0.5)                        # what a 0.5 m sphere at point is touching, or None
+city.airspace.blocked(points, hour=10.5)                   # which no-fly zone each point is in, or ""
 ```
 
 ## How it works
@@ -110,8 +128,9 @@ python -m sim.render     # redraw the pictures in docs/images
 ## Layout
 
 ```
-sim/city.py          city layout: streets, ZIP codes, zones, distribution centre, houses, apartments, trees, power lines
-sim/geometry.py      3D obstacles: raycasts and contact checks
+sim/city.py          city layout: streets, ZIP codes, zones, distribution centre, hills, houses, hazards, airspace
+sim/geometry.py      3D obstacles and hilly ground: raycasts and contact checks
+sim/airspace.py      no-fly zones with heights and hours
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
 sim/vehicle.py       kinematic bicycle model and collision shape, used by the truck and traffic
