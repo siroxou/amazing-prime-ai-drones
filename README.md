@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and so are both Amazon baselines: DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site. Next are the trucks-only baseline and the classical truck + drone solver, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and so are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site) and a trucks-only version of this project's system. Next is the classical truck + drone solver, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -123,6 +123,21 @@ What this shows so far:
 
 The wind limit, the cargo box size and the reload time are guesses, because none are published; [docs/amazon-baseline.md](docs/amazon-baseline.md) lists them all.
 
+## This project's trucks, without the drones
+
+To see how much of any gain comes from the drones, the same autonomous trucks run with lockers only. Each truck stops at pickup points on the street, chosen so every recipient is within the distance they'll walk. People get 10 minutes' warning, walk over and open their compartment. The truck waits a set time at each point, and the parcels of anyone who misses it go back to the station ([results/trucks-only-baseline.md](results/trucks-only-baseline.md)):
+
+| truck waits at each point | 10 min | 20 min | 30 min | DSP vans, for comparison |
+|---|---|---|---|---|
+| parcels delivered today | 82% | 93% | 97% | 100% |
+| last parcel | 12:17 | 14:28 | 16:38 | 15:46 |
+| half of all parcels by | 11:23 | 12:23 | 13:18 | 12:57 |
+| delivered by 14:00 | 82% | 86% | 57% | 69% |
+| vehicles | 3 trucks | 3 trucks | 3 trucks | 2 vans |
+| driver hours | 0 | 0 | 0 | 12.5 |
+
+Without drones, the locker trucks are faster than the vans, but only by leaving parcels behind or making people come out for them. The wait at each point trades one against the other. All of this rests on guessed recipient behaviour (how far people walk, how fast they come) that has no public data behind it; [docs/days.md](docs/days.md) says so. Recipients walk 90 m on average. The trucks need no drivers, but someone still has to watch over them remotely, and that isn't counted yet.
+
 ## How it works
 
 | Decision | Made by | Depends on |
@@ -188,6 +203,7 @@ python -m sim.day        # build a delivery day: parcels, weather, traffic
 python -m baselines.calibrate        # check the DSP van model against Amazon's figures (about 10 min)
 python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
 python -m baselines.prime_air --held-out   # Prime Air at 5, 10 and 20 drones (about 15 min)
+python -m baselines.trucks_only --held-out # trucks with lockers, no drones (about 15 min)
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -202,6 +218,7 @@ sim/roads.py         driving times on the road graph
 baselines/dsp.py     Amazon DSP vans: OR-Tools routes, shift with traffic
 baselines/calibrate.py  checks the van model against Amazon's stops and packages per route
 baselines/prime_air.py  Amazon Prime Air drones from a fixed site, vans for the rest
+baselines/trucks_only.py  this project's trucks and lockers without the drones
 results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project

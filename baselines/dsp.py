@@ -59,9 +59,10 @@ class Shift:
         return self.hourly[min(max(int(clock), self.hours[0]), self.hours[-1])][i, j]
 
 
-def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS):
+def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS, load=None, capacity=None):
     """Routes for up to `vans` vans that all fit in the shift, or None if OR-Tools finds none.
-    With optional=True, stops may be left out (it then fits in as many as it can).
+    With optional=True, stops may be left out (it then fits in as many as it can). With `load`
+    (per stop, the station first) and `capacity`, no route carries more than `capacity`.
     Each route is a list of stop indices (1..n) in driving order."""
     n = len(shift.nodes)
     cost = np.rint(shift.mean + service[None, :]).astype(int)  # drive from i to j, then deliver at j
@@ -75,6 +76,10 @@ def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS):
     # Also keep the longest route short, so the work is shared out between the vans and the last
     # parcel goes out as early as it can. Real routes are balanced too.
     routing.GetDimensionOrDie("time").SetGlobalSpanCostCoefficient(BALANCE)
+    if load is not None:
+        need = [int(x) for x in load]
+        demand = routing.RegisterUnaryTransitCallback(lambda a: need[manager.IndexToNode(a)])
+        routing.AddDimensionWithVehicleCapacity(demand, 0, [int(capacity)] * vans, True, "load")
     if optional:
         for node in range(1, n):
             routing.AddDisjunction([manager.NodeToIndex(node)], SKIPPED)

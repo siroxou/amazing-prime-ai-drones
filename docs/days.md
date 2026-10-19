@@ -28,6 +28,8 @@ Only matters for parcels too big for a drone, which go in the truck's locker. Ev
 
 These two decide how well the locker works and have no public data behind them, so locker results get reported across a range of them.
 
+The trucks-only baseline adds four more guesses: 10 minutes' warning before the truck arrives, a wait of 10, 20 or 30 minutes at each pickup point (all three are reported), walking at 1.3 m/s, and pavements 1.3 times the straight-line distance. Each locker has 200 compartments.
+
 ## Weather
 
 Hourly from 0:00 to 24:00, interpolated in between.
