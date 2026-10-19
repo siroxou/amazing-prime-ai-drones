@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 1 is done. The 3D city is in (streets, ZIP codes, delivery zones, the distribution centre, hills, houses, apartment blocks, hazards and no-fly airspace), and so are random delivery days: parcels, recipients, weather and traffic. Next are the Amazon baselines, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and the first Amazon baseline, DSP vans, is calibrated and benchmarked. Next are the Prime Air and trucks-only baselines, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -84,6 +84,24 @@ city built in 730 ms, city + day in 734 ms
 
 Most of these settings are reasoned guesses, because there's little public data on parcel mixes or recipients. [docs/days.md](docs/days.md) lists every setting, where each one comes from, and which are guesses. The 50 benchmark days are saved in `data/held-out/` (city seeds 1000–1009, which training never uses), so benchmark results stay comparable.
 
+## The Amazon baseline so far: DSP vans
+
+Vans load at the distribution centre from 9:30, leave at 10:00, deliver in the order OR-Tools plans, and must be back by 19:30. A stop is a building, so a whole apartment block counts as one. Routes are planned on drive times averaged over the shift, then driven with the traffic at the time of each leg.
+
+**Calibration first.** The one setting that isn't public is how long a driver spends at each stop. It's fitted so a 10-hour route lands in Amazon's published 150–190 stops and 200–300 packages ([results/dsp-calibration.md](results/dsp-calibration.md)). It does, for both dense and suburban areas, with 166–209 s per stop, well inside what's physically plausible. The baseline uses the fast end, 166 s, which is the most generous choice for Amazon.
+
+**On the 50 held-out days** (500 parcels each, [results/dsp-baseline.md](results/dsp-baseline.md)):
+
+| | mean | range |
+|---|---|---|
+| vans | 2 | 2–2 |
+| last parcel delivered | 15:46 | 15:11–16:27 |
+| half the parcels delivered by | 12:57 | 11:37–14:18 |
+| delivered by 14:00 | 69% | 47–87% |
+| driver hours | 12.5 | 11.4–13.9 |
+
+These numbers are what the drone fleet has to beat. Two things to keep in mind. Each van does 93–129 stops here, fewer than a full Amazon route, because 500 parcels fill a little more than one van; part-full routes finish early, which flatters the baseline. And routes through apartment blocks carry up to about 350 packages, above Amazon's 300, because a whole block is one stop. Amazon says dense routes carry more but gives no figure.
+
 ## How it works
 
 | Decision | Made by | Depends on |
@@ -146,6 +164,8 @@ pip install -r requirements.txt -r requirements-train.txt
 pytest tests
 python -m sim.city       # build a city, print what's in it, time the raycasts
 python -m sim.day        # build a delivery day: parcels, weather, traffic
+python -m baselines.calibrate        # check the DSP van model against Amazon's figures (about 10 min)
+python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -156,6 +176,10 @@ sim/city.py          city layout: streets, ZIP codes, zones, distribution centre
 sim/geometry.py      3D obstacles and hilly ground: raycasts and contact checks
 sim/airspace.py      no-fly zones with heights and hours
 sim/day.py           a delivery day: parcels, recipients, weather, traffic; day files
+sim/roads.py         driving times on the road graph
+baselines/dsp.py     Amazon DSP vans: OR-Tools routes, shift with traffic
+baselines/calibrate.py  checks the van model against Amazon's stops and packages per route
+results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
 sim/vehicle.py       kinematic bicycle model and collision shape, used by the truck and traffic

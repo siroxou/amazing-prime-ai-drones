@@ -34,8 +34,12 @@ Steps 1 and 2 happen the same way for both systems, so they're left out: parcels
 | Stops per DSP route | 150–190 | Amazon: a DSP owner says drivers typically have at least 150 stops [1]; a DSP driver reports 170–190 [2] |
 | Packages per DSP route | 200–300 | Amazon: 200–300 a day, more in dense areas such as apartment blocks [1]; a driver reports 250–300 [2] |
 | Shift length | 10 hours | common in DSP job listings and driver reports [3]. Real days sometimes run longer; the sim uses 10 hours, which favours Amazon |
-| Service time per stop | set so the van hits the stop counts above | not published. Calibrated: with a 10-hour shift and the city's driving times, it's the value that gives 150–190 stops. Reported results use the fast end |
-| Station loadout | parameter, starting at 30 minutes | not published; reported with every result |
+| Service time per stop | 166 s, the fast end of a calibrated 166–209 s window | not published. Calibrated: with a 10-hour shift and the city's driving times, it's what gives 150–190 stops ([results/dsp-calibration.md](../results/dsp-calibration.md)). Reported results use the fast end |
+| Extra time per extra package at a stop | 10 s | guess |
+| What counts as a stop | one building: a house, or a whole apartment block | how drivers count stops |
+| Station loadout | 30 minutes | not published; reported with every result |
+| Shift start | 9:30, out of the station by 10:00 | guess; only affects which hours' traffic the vans meet |
+| Breaks | none modelled | the service time absorbs them, since the public stop counts include them |
 | Prime Air payload | 5 lb (about 2.3 kg) | reported specs for the MK30 drone [4][5] |
 | Prime Air radius | 7.5 miles (about 12 km) from the site | Amazon: up to 7.5 miles from an Amazon facility [6] |
 | Prime Air promise | delivery within 60 minutes | Amazon [6]. Expansion coverage talks about 30 minutes as a goal [7]; the sim uses actual flight time, which is shorter than either |
@@ -43,6 +47,8 @@ Steps 1 and 2 happen the same way for both systems, so they're left out: parcels
 ## Calibration check
 
 Before any comparison, the DSP van model has to reproduce the public figures: in each density preset, a 10-hour route should land in the 150–190 stop and 200–300 package range. If it doesn't, the city or the settings get fixed first. This stops the fleet from looking good just because the van model is slow.
+
+**Result: passed** ([results/dsp-calibration.md](../results/dsp-calibration.md), `python -m baselines.calibrate`). In a 24 x 24-block city, with 15% of houses getting parcels, a service time of 166–209 s puts routes in both the dense and suburban districts inside 150–190 stops and 200–300 packages. That's inside the plausible 30–228 s. With 10% or 25% of houses getting parcels, the fast end moves only to 157–171 s. Apartment blocks aren't calibrated, because Amazon gives no stop figures for them.
 
 ## Known gaps
 

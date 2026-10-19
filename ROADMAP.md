@@ -50,10 +50,10 @@ Measured with `python -m sim.day` on an Apple Silicon laptop: the default city (
 
 Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,000. Curving streets leave more open ground than a grid. Most of the day's settings are reasoned guesses rather than public figures; [docs/days.md](docs/days.md) marks which are which.
 
-## Phase 2: Baselines
+## Phase 2: Baselines ← in progress
 
-- [ ] **Amazon DSP vans:** loadout at the delivery station, one van and driver per route, routes planned by OR-Tools (so the driver gets a good route for free), driving at the speed limit with traffic, a service time per stop for parking, walking to the door and back, and a shift length cap. Every setting comes from public figures with a range, listed in [docs/amazon-baseline.md](docs/amazon-baseline.md), and results are reported against the fast end
-- [ ] **Calibration:** with the DSP settings, a 10-hour route in each density preset should land in the publicly reported range of stops and packages per route. If it doesn't, the city or the settings are wrong, and that gets fixed before anything is compared
+- [x] **Amazon DSP vans:** loadout at the delivery station, one van and driver per route, routes planned by OR-Tools (so the driver gets a good route for free), driving at the speed limit with traffic, a service time per stop for parking, walking to the door and back, and a shift length cap. Every setting comes from public figures with a range, listed in [docs/amazon-baseline.md](docs/amazon-baseline.md), and results are reported against the fast end (`baselines/dsp.py`, results in [results/dsp-baseline.md](results/dsp-baseline.md))
+- [x] **Calibration:** with the DSP settings, a 10-hour route in each density preset should land in the publicly reported range of stops and packages per route. If it doesn't, the city or the settings are wrong, and that gets fixed before anything is compared. **Passed**: 166–209 s per stop puts both districts in range ([results/dsp-calibration.md](results/dsp-calibration.md))
 - [ ] **Prime Air from fixed sites:** drones flying from the delivery station or a drone site, with the published payload and radius limits. Parcels out of range or too heavy go by DSP van. Shows whether launching from a moving truck beats launching from a fixed site
 - [ ] **Autonomous trucks, no drones:** every parcel goes in the truck's locker and recipients collect it at stops along the route. Shows how much of any gain comes from the drones
 - [ ] **Classical truck + drone solver:** zone assignment, truck routing and drone sortie scheduling with OR-Tools plus construction heuristics, using the drone cost model from Phase 3 (start with a simple fixed-speed version)
