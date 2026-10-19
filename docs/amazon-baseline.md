@@ -40,8 +40,17 @@ Steps 1 and 2 happen the same way for both systems, so they're left out: parcels
 | Station loadout | 30 minutes | not published; reported with every result |
 | Shift start | 9:30, out of the station by 10:00 | guess; only affects which hours' traffic the vans meet |
 | Breaks | none modelled | the service time absorbs them, since the public stop counts include them |
-| Prime Air payload | 5 lb (about 2.3 kg) | reported specs for the MK30 drone [4][5] |
-| Prime Air radius | 7.5 miles (about 12 km) from the site | Amazon: up to 7.5 miles from an Amazon facility [6] |
+| Prime Air site | at the distribution centre | Prime Air flies from Amazon delivery facilities [6] |
+| Prime Air payload | 5 lb (about 2.3 kg), one parcel per flight | reported specs for the MK30 drone [4][5] |
+| Prime Air parcel size | envelope, small and medium boxes; not large or oversize | guess: no cargo box size is published |
+| Prime Air radius | 7.5 miles (about 12 km) from the site | Amazon: up to 7.5 miles from an Amazon facility [6]. The whole sim city is inside it |
+| Prime Air cruise | 30 m/s (58 knots) at 61 m (200 ft), never above 122 m (400 ft) | FAA environmental filings for Prime Air sites [9][10] |
+| Prime Air drop | lowers to 4 m (13 ft) over the yard and lets go; needs open sky and 3 m (10 ft) clear around | FAA filing and press coverage [9][11]. Houses only: the MK30 delivers to yards, not balconies |
+| Climb, descent, drop and turnaround | 3 m/s up, 2 m/s down, 15 s to let go, 5 min at the site to reload and change battery | guess |
+| Weather | flies in light rain (up to 2.5 mm/h) and gusts up to 12 m/s | Amazon says the MK30 flies in light rain [11]; 2.5 mm/h is where "light rain" ends. No wind limit is published; 12 m/s is a guess, and it grounds the drones on about 10% of days |
+| No-fly zones | flies over school zones (they end at 60 m) and under the airfield's 30 m limit; goes round the hospital and stadium zones; won't drop inside an active zone | the sim's airspace rules |
+| Drones at the site | 5, 10 and 20 | not published; all three are reported |
+| Flying hours | 10:00 to 19:30, the same as the vans | guess |
 | Prime Air promise | delivery within 60 minutes | Amazon [6]. Expansion coverage talks about 30 minutes as a goal [7]; the sim uses actual flight time, which is shorter than either |
 
 ## Calibration check
@@ -66,3 +75,6 @@ Before any comparison, the DSP van model has to reproduce the public figures: in
 6. AWS, [Air delivery](https://aws.amazon.com/solutions/amazon/one-amazon-lane/air-delivery/)
 7. TechSpot, [Amazon to bring 30-minute drone delivery to 500 US locations by the end of 2026](https://www.techspot.com/news/113543-amazon-drones-soon-deliver-nearly-500-us-cities.html)
 8. Amazon, [Our fulfillment centers](https://www.aboutamazon.com/amazon-fulfillment/our-fulfillment-centers), for the network description above
+9. FAA, [Technical noise report, Amazon Prime Air, Omaha](https://www.faa.gov/uas/advanced_operations/nepa_and_drones/Amazon_Omaha_NE_Appendix_E_ADA_508_Final.pdf)
+10. FAA, [Amazon Prime Air operations specifications re-evaluation, Pendleton](https://www.faa.gov/uas/advanced_operations/nepa_and_drones/20250827_Amazon_Pendleton_OR_Written_ReEvaluation.pdf)
+11. Amazon, [Photos of the MK30 drone](https://www.aboutamazon.com/news/transportation/amazon-prime-air-drone-delivery-mk30-photos)

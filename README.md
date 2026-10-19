@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and the first Amazon baseline, DSP vans, is calibrated and benchmarked. Next are the Prime Air and trucks-only baselines, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and so are both Amazon baselines: DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site. Next are the trucks-only baseline and the classical truck + drone solver, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -84,7 +84,9 @@ city built in 730 ms, city + day in 734 ms
 
 Most of these settings are reasoned guesses, because there's little public data on parcel mixes or recipients. [docs/days.md](docs/days.md) lists every setting, where each one comes from, and which are guesses. The 50 benchmark days are saved in `data/held-out/` (city seeds 1000–1009, which training never uses), so benchmark results stay comparable.
 
-## The Amazon baseline so far: DSP vans
+## The Amazon baselines
+
+### DSP vans
 
 Vans load at the distribution centre from 9:30, leave at 10:00, deliver in the order OR-Tools plans, and must be back by 19:30. A stop is a building, so a whole apartment block counts as one. Routes are planned on drive times averaged over the shift, then driven with the traffic at the time of each leg.
 
@@ -101,6 +103,25 @@ Vans load at the distribution centre from 9:30, leave at 10:00, deliver in the o
 | driver hours | 12.5 | 11.4–13.9 |
 
 These numbers are what the drone fleet has to beat. Two things to keep in mind. Each van does 93–129 stops here, fewer than a full Amazon route, because 500 parcels fill a little more than one van; part-full routes finish early, which flatters the baseline. And routes through apartment blocks carry up to about 350 packages, above Amazon's 300, because a whole block is one stop. Amazon says dense routes carry more but gives no figure.
+
+### Prime Air from a fixed site
+
+Drones fly from a site at the distribution centre, one parcel at a time, at the MK30's published cruise speed and height. Each one lowers the parcel to 4 m over a clear yard and lets go. Vans take everything the drones can't. A drone can only take a parcel of 5 lb or less, in a box no bigger than medium, to a house with a yard that has open sky and 3 m clear around the drop. It can fly in light rain and gusts up to 12 m/s, and it goes round no-fly zones it can't fly over ([results/prime-air-baseline.md](results/prime-air-baseline.md)):
+
+| drones at the site | by drone | vans | last parcel | half delivered by | by 14:00 | driver hours |
+|---|---|---|---|---|---|---|
+| none (vans only) | 0% | 2.0 | 15:46 | 12:57 | 69% | 12.5 |
+| 5 | 29% | 1.1 | 16:54 | 13:04 | 67% | 7.4 |
+| 10 | 30% | 1.1 | 16:26 | 12:41 | 73% | 7.2 |
+| 20 | 30% | 1.1 | 16:24 | 12:30 | 74% | 7.2 |
+
+What this shows so far:
+
+- **What limits Prime Air is which parcels it can take, not how many drones it has.** Going from 5 to 20 drones barely changes anything. Of all parcels, 48% have no drop spot (flats, and yards with a tree, roof or shed in the way) and 17% are too heavy. Weather keeps another 3% on the ground (4 of the 50 days are grounded all day), and no-fly zones another 2%.
+- **Drones save driver hours, not time.** With a third of the parcels in the air, one van can do the rest, so Amazon would run one van instead of two and save about 40% of the driver hours. But that one van finishes later, so the last parcel arrives later than with two vans.
+- **The fixed site's 7.5-mile range doesn't bind here,** because the whole sim city is about a mile across. In a bigger city, range would start to matter.
+
+The wind limit, the cargo box size and the reload time are guesses, because none are published; [docs/amazon-baseline.md](docs/amazon-baseline.md) lists them all.
 
 ## How it works
 
@@ -166,6 +187,7 @@ python -m sim.city       # build a city, print what's in it, time the raycasts
 python -m sim.day        # build a delivery day: parcels, weather, traffic
 python -m baselines.calibrate        # check the DSP van model against Amazon's figures (about 10 min)
 python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
+python -m baselines.prime_air --held-out   # Prime Air at 5, 10 and 20 drones (about 15 min)
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -179,6 +201,7 @@ sim/day.py           a delivery day: parcels, recipients, weather, traffic; day 
 sim/roads.py         driving times on the road graph
 baselines/dsp.py     Amazon DSP vans: OR-Tools routes, shift with traffic
 baselines/calibrate.py  checks the van model against Amazon's stops and packages per route
+baselines/prime_air.py  Amazon Prime Air drones from a fixed site, vans for the rest
 results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project

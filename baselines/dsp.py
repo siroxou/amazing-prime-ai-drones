@@ -113,10 +113,16 @@ def drive(shift, route, service):
     return done, clock + shift.leg(at, 0, clock) / 3600, metres + shift.metres[at, 0]
 
 
-def baseline(day, service=SERVICE, seconds=SOLVER_SECONDS):
-    """Deliver a whole day with as few DSP vans as OR-Tools can fit it into."""
+def baseline(day, service=SERVICE, seconds=SOLVER_SECONDS, by_van=None):
+    """Deliver a day with as few DSP vans as OR-Tools can fit it into. `by_van` (a mask over the
+    day's parcels) limits the vans to some of them; the others get NaN times."""
     city = day.city
-    addresses, packages = np.unique(day.parcel_address, return_counts=True)
+    by_van = np.ones(len(day.parcel_address), bool) if by_van is None else np.asarray(by_van, bool)
+    if not by_van.any():
+        return {"vans": 0, "stops": [], "packages": [], "parcel_time": np.full(len(by_van), np.nan),
+                "undelivered": 0, "last": np.nan, "driver_hours": 0.0, "km": 0.0}
+    mine = day.parcel_address[by_van]
+    addresses, packages = np.unique(mine, return_counts=True)
     _, nodes, per_stop, which = stops(city, addresses, packages)
     svc = service_times(per_stop, service)
     shift = Shift(day, nodes)
@@ -130,14 +136,15 @@ def baseline(day, service=SERVICE, seconds=SOLVER_SECONDS):
         back.append(home)
         metres += m
     stop_time = np.array([delivered.get(j + 1, np.nan) for j in range(len(nodes))])
-    parcel_time = stop_time[which[np.searchsorted(addresses, day.parcel_address)]]
+    parcel_time = np.full(len(by_van), np.nan)
+    parcel_time[by_van] = stop_time[which[np.searchsorted(addresses, mine)]]
     return {
         "vans": len(routes),
         "stops": [len(r) for r in routes],
         "packages": [int(per_stop[np.array(r) - 1].sum()) for r in routes],
         "parcel_time": parcel_time,  # clock time each parcel was delivered, NaN if it came back undelivered
-        "undelivered": int(np.isnan(parcel_time).sum()),
-        "last": float(np.nanmax(parcel_time)),
+        "undelivered": int(np.isnan(parcel_time[by_van]).sum()),
+        "last": float(np.nanmax(parcel_time[by_van])) if (~np.isnan(parcel_time[by_van])).any() else np.nan,
         "driver_hours": float(sum(b - SHIFT_START for b in back)),
         "km": metres / 1000,
     }
