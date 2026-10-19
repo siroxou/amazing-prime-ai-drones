@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 1 is in progress. The 3D city is in: streets, ZIP codes, delivery zones, the distribution centre, hills, houses, apartment blocks, hazards and no-fly airspace. Parcels, weather, baselines, the optimiser and the drone sim come next, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 1 is done. The 3D city is in (streets, ZIP codes, delivery zones, the distribution centre, hills, houses, apartment blocks, hazards and no-fly airspace), and so are random delivery days: parcels, recipients, weather and traffic. Next are the Amazon baselines, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -60,6 +60,29 @@ city.obstacles.cast(origin, directions, 40.0)              # distances and what 
 city.obstacles.touching(point, 0.5)                        # what a 0.5 m sphere at point is touching, or None
 city.airspace.blocked(points, hour=10.5)                   # which no-fly zone each point is in, or ""
 ```
+
+## A delivery day
+
+Each morning a random set of parcels is waiting at the distribution centre. `Day(city, parcels=500)` gives:
+
+- **Parcels:** each one has an address, a size (envelope to oversize), dimensions, a weight and a fragility (robust, careful, fragile). Addresses get about 1.45 parcels each, in line with what DSP routes report, and about 82–85% of parcels weigh 5 lb or less, close to the 86% Amazon gave when it announced Prime Air.
+- **Recipients:** for parcels that go in the truck's locker, how far each person will walk to the truck and how soon they turn up.
+- **Weather, hour by hour:** temperature, wind speed and direction with gusts, wind growing with height, and rain on about 30% of days.
+- **Traffic:** `day.travel_time(hour)` gives the time to drive every road edge, with rush hours, busier and quieter streets, and rain.
+
+```
+$ python -m sim.day
+city seed 0, day 0: 500 parcels to 328 addresses (1.52 per stop)
+sizes: 30% envelope, 34% small, 24% medium, 10% large, 2% oversize
+weight: median 0.9 kg, 82% at 5 lb (2.27 kg) or less, heaviest 20.5 kg
+fragility: 70% robust, 21% careful, 9% fragile
+recipients walk up to a median 251 m and turn up after a median 9 min
+weather: 5 to 18 C, wind 5.1 m/s average with gusts to 11.1 m/s, 0.0 mm of rain
+traffic: arterials take 1.64x as long at 8:00 as at 3:00
+city built in 730 ms, city + day in 734 ms
+```
+
+Most of these settings are reasoned guesses, because there's little public data on parcel mixes or recipients. [docs/days.md](docs/days.md) lists every setting, where each one comes from, and which are guesses. The 50 benchmark days are saved in `data/held-out/` (city seeds 1000–1009, which training never uses), so benchmark results stay comparable.
 
 ## How it works
 
@@ -122,6 +145,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-train.txt
 pytest tests
 python -m sim.city       # build a city, print what's in it, time the raycasts
+python -m sim.day        # build a delivery day: parcels, weather, traffic
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -131,6 +155,7 @@ python -m sim.render     # redraw the pictures in docs/images
 sim/city.py          city layout: streets, ZIP codes, zones, distribution centre, hills, houses, hazards, airspace
 sim/geometry.py      3D obstacles and hilly ground: raycasts and contact checks
 sim/airspace.py      no-fly zones with heights and hours
+sim/day.py           a delivery day: parcels, recipients, weather, traffic; day files
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
 sim/vehicle.py       kinematic bicycle model and collision shape, used by the truck and traffic
@@ -139,6 +164,8 @@ sim/policy.py        runs an exported policy with plain numpy
 train/export.py      exports a trained PPO model to .npz for sim/policy.py
 tests/               tests
 docs/amazon-baseline.md  how Amazon's current last mile is modelled, with sources
+docs/days.md         every setting for parcels, weather and traffic, and where it comes from
+data/held-out/       the 50 fixed benchmark days
 ROADMAP.md           phases and exit criteria
 ```
 
