@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 2 is in progress. The 3D city and random delivery days are in (Phase 1), and so are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site) and a trucks-only version of this project's system. Next is the classical truck + drone solver, then the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phase 2 is nearly done. The 3D city and random delivery days are in (Phase 1). So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a first classical solver for the full truck + drone fleet. Left in Phase 2: launching from a moving truck, and making the benchmarks fast enough. Then the drone cost model, the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -84,6 +84,19 @@ city built in 730 ms, city + day in 734 ms
 
 Most of these settings are reasoned guesses, because there's little public data on parcel mixes or recipients. [docs/days.md](docs/days.md) lists every setting, where each one comes from, and which are guesses. The 50 benchmark days are saved in `data/held-out/` (city seeds 1000–1009, which training never uses), so benchmark results stay comparable.
 
+## Results so far
+
+The same 50 held-out days for every system, averaged ([results/baselines.md](results/baselines.md)):
+
+| system | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
+|---|---|---|---|---|---|---|
+| Amazon DSP vans | 100% | 15:46 | 12:57 | 69% | 2 vans | 12.5 |
+| Amazon Prime Air (10 drones) plus vans | 100% | 16:26 | 12:41 | 73% | 1.1 vans | 7.2 |
+| Locker trucks, no drones (10 min wait) | 82% | 12:17 | 11:23 | 82% | 3 trucks | 0 |
+| **Trucks with 10 drones each, classical solver** | 90% | 11:45 | 10:58 | 90% | 2 trucks | 0 |
+
+The truck + drone fleet finishes about four hours before the vans. But it leaves 10% of parcels behind: locker parcels whose recipients didn't come out in time. Its drone model is still the simple fixed-speed one, and much of what it depends on is guessed. [results/baselines.md](results/baselines.md) lists what to trust and what not to. The sections below explain each system.
+
 ## The Amazon baselines
 
 ### DSP vans
@@ -137,6 +150,12 @@ To see how much of any gain comes from the drones, the same autonomous trucks ru
 | driver hours | 0 | 0 | 0 | 12.5 |
 
 Without drones, the locker trucks are faster than the vans, but only by leaving parcels behind or making people come out for them. The wait at each point trades one against the other. All of this rests on guessed recipient behaviour (how far people walk, how fast they come) that has no public data behind it; [docs/days.md](docs/days.md) says so. Recipients walk 90 m on average. The trucks need no drivers, but someone still has to watch over them remotely, and that isn't counted yet.
+
+## This project's fleet: the classical solver
+
+The first version of the fleet is planned with plain heuristics and OR-Tools. Each truck carries 10 drones and a locker. It parks at a series of stops. From each one its drones fly out to the parcels assigned to that stop and come back, and locker recipients nearby walk over. A drone takes any parcel up to 5 kg and large-box size, to a yard, a porch or a top-floor balcony with open sky. Everything else goes in the locker. Locker pickup points come first, drone parcels fly from the nearest one within 600 m, and the rest get launch stops of their own. At each stop the sorties are shared out between the drones, and the trucks are routed through the stops. When the weather or a no-fly zone stops a drone at the time the truck gets there, the parcel moves to the locker and the day is planned again ([results/classical-solver.md](results/classical-solver.md)).
+
+The drones are modelled simply for now: 15 m/s, a minute to launch and land, 30 s to drop, a minute to reload, and up to 3 km from the truck. That's a fixed-speed model with no wind, payload or battery effects; Phase 3 replaces it. The launch radius barely matters (300, 600 and 1,000 m give the same results within a few minutes), because locker pickup points are already close to most drone parcels. So far the drones launch from and land back on a parked truck; launching from a moving truck comes next.
 
 ## How it works
 
@@ -204,6 +223,7 @@ python -m baselines.calibrate        # check the DSP van model against Amazon's 
 python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
 python -m baselines.prime_air --held-out   # Prime Air at 5, 10 and 20 drones (about 15 min)
 python -m baselines.trucks_only --held-out # trucks with lockers, no drones (about 15 min)
+python -m baselines.classical --held-out   # the truck + drone fleet, classical solver (about 30 min)
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -219,6 +239,7 @@ baselines/dsp.py     Amazon DSP vans: OR-Tools routes, shift with traffic
 baselines/calibrate.py  checks the van model against Amazon's stops and packages per route
 baselines/prime_air.py  Amazon Prime Air drones from a fixed site, vans for the rest
 baselines/trucks_only.py  this project's trucks and lockers without the drones
+baselines/classical.py  this project's truck + drone fleet, planned with heuristics and OR-Tools
 results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project

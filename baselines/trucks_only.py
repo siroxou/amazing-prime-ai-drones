@@ -33,14 +33,17 @@ WALK_DETOUR = 1.3  # walking distance along pavements, over the straight line; g
 LOCKER = 200  # compartments per truck, one parcel each; guess
 
 
-def pickup_points(city, day):
-    """Choose pickup points. Returns (road node per point, point index per parcel or -1 if the
-    recipient won't walk to any road node, walking distance per parcel)."""
-    door = city.address_door[day.parcel_address, :2]
+def pickup_points(city, day, which=None):
+    """Choose pickup points for the parcels `which` picks out (a mask; default all). Returns (road node
+    per point, point index per chosen parcel or -1 if its recipient won't walk to any road node,
+    walking distance per chosen parcel)."""
+    which = np.ones(len(day.parcel_address), bool) if which is None else np.asarray(which, bool)
+    door = city.address_door[day.parcel_address[which], :2]
+    limit = day.recipient_walk[which]
     nodes = np.flatnonzero((city.nodes[:, 0] >= 0) & (city.nodes[:, 0] <= city.width)
                            & (city.nodes[:, 1] >= 0) & (city.nodes[:, 1] <= city.height))
     walk = WALK_DETOUR * np.linalg.norm(door[:, None] - city.nodes[nodes][None], axis=-1)  # parcels x nodes
-    reach = walk <= day.recipient_walk[:, None]
+    reach = walk <= limit[:, None]
     chosen, left = [], reach.any(1)
     while left.any():
         best = int((reach & left[:, None]).sum(0).argmax())

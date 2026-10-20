@@ -56,10 +56,13 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 - [x] **Calibration:** with the DSP settings, a 10-hour route in each density preset should land in the publicly reported range of stops and packages per route. If it doesn't, the city or the settings are wrong, and that gets fixed before anything is compared. **Passed**: 166–209 s per stop puts both districts in range ([results/dsp-calibration.md](results/dsp-calibration.md))
 - [x] **Prime Air from fixed sites:** drones flying from the delivery station or a drone site, with the published payload and radius limits. Parcels out of range or too heavy go by DSP van. Shows whether launching from a moving truck beats launching from a fixed site (`baselines/prime_air.py`, results in [results/prime-air-baseline.md](results/prime-air-baseline.md))
 - [x] **Autonomous trucks, no drones:** every parcel goes in the truck's locker and recipients collect it at stops along the route. Shows how much of any gain comes from the drones (`baselines/trucks_only.py`, results in [results/trucks-only-baseline.md](results/trucks-only-baseline.md))
-- [ ] **Classical truck + drone solver:** zone assignment, truck routing and drone sortie scheduling with OR-Tools plus construction heuristics, using the drone cost model from Phase 3 (start with a simple fixed-speed version)
-- [ ] Metrics per day: time until the last parcel is delivered, share delivered by a set time, average time from station to doorstep, parcels per hour per vehicle, driver hours, distance driven, drone energy, parcels that went by locker and why, and how long locker recipients waited and walked
+- [x] **Classical truck + drone solver:** launch stops, drone sortie scheduling and truck routing with OR-Tools plus construction heuristics, with a simple fixed-speed drone model for now; it moves to the Phase 3 cost model when that's in (`baselines/classical.py`, results in [results/classical-solver.md](results/classical-solver.md))
+- [ ] Drones that launch from a moving truck and land on it further along the route; the solver so far launches and recovers at the same stop
+- [x] Metrics per day: time until the last parcel is delivered, share delivered by a set time, average time from station to doorstep, parcels per hour per vehicle, driver hours, distance driven, drone energy, parcels that went by locker and why, and how long locker recipients waited and walked
 
 **Exit:** the DSP calibration passes, and all baselines run on the full held-out set in under 10 minutes on a laptop, with results in `results/baselines.md`.
+
+So far: the calibration passes and [results/baselines.md](results/baselines.md) has every baseline side by side, but run one after the other they take about 25 minutes, so the time part fails. Next: run the days in parallel.
 
 ## Phase 3: Drone cost model and drop planning
 
