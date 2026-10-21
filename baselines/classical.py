@@ -108,15 +108,20 @@ def launch_stops(city, targets, base, radius):
     return stops, stop
 
 
-def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS):
+def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS, moving=False):
+    """Plan and run a day. With moving=True the trucks don't wait for their drones: drones launch from
+    and land on the truck as it drives (baselines/moving.py)."""
+    from baselines import moving as on_the_move
+
+    fly_them = on_the_move.fly if moving else _fly
     city = day.city
     n = len(day.parcel_address)
     spot = drone_spots(city)[day.parcel_address]
     target = city.spot_pos[np.maximum(spot, 0), :2]
     fly = (spot >= 0) & (day.parcel_weight <= PAYLOAD) & np.isin(day.parcel_size, SIZES)
     for attempt in range(2):
-        plan = _plan(day, fly, target, radius, window, seconds)
-        drop_time, failed = _fly(day, plan, spot, target)
+        plan = _plan(day, fly, target, radius, window, seconds, parked=not moving)
+        drop_time, failed, extra = fly_them(day, plan, spot, target)
         if attempt == 0 and failed.any():
             fly = fly.copy()
             fly[np.flatnonzero(fly)[failed]] = False  # the weather or a no-fly zone stops them: locker instead
@@ -128,15 +133,16 @@ def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS):
     locker = np.flatnonzero(~plan["fly"])
     t[locker] = plan["collected"]
     return {
-        "radius": radius, "trucks": plan["trucks"], "stops": len(plan["nodes"]), "parcel_time": t,
+        "radius": radius, "moving": moving, "trucks": plan["trucks"], "stops": len(plan["nodes"]), "parcel_time": t,
         "by_drone": float((~np.isnan(t[flown])).sum() / n),
         "undelivered": int(np.isnan(t).sum()), "last": float(np.nanmax(t)) if (~np.isnan(t)).any() else np.nan,
-        "truck_hours": plan["truck_hours"], "km": plan["km"], "replanned": int(attempt),
+        "truck_hours": plan["truck_hours"] + extra, "km": plan["km"], "replanned": int(attempt),
     }
 
 
-def _plan(day, fly, target, radius, window, seconds):
-    """Stops, drone sorties and truck routes for one split of parcels into drone and locker."""
+def _plan(day, fly, target, radius, window, seconds, parked=True):
+    """Stops, drone sorties and truck routes for one split of parcels into drone and locker. Parked, a
+    truck waits at each stop until its drones are back; otherwise it only waits for the locker."""
     city = day.city
     base, point, walk = trucks_only.pickup_points(city, day, ~fly)
     nodes, drone_stop = launch_stops(city, target[fly], base, radius)
@@ -149,7 +155,7 @@ def _plan(day, fly, target, radius, window, seconds):
     for s in range(len(nodes)):
         mine = np.flatnonzero((drone_stop == s) & np.isfinite(length))
         start[mine], busy = share_out(sortie_seconds(length[mine]))
-        dwell[s] = busy
+        dwell[s] = busy if parked else 0.0
     dwell[np.unique(point[point >= 0])] = np.maximum(dwell[np.unique(point[point >= 0])], window * 60)
     dwell = np.maximum(dwell, 60.0)  # at least a minute to park and set off again
     load = np.r_[0, np.bincount(np.r_[point[point >= 0], drone_stop], minlength=len(nodes))]
@@ -172,7 +178,8 @@ def _plan(day, fly, target, radius, window, seconds):
     leave = stop_at + dwell[np.maximum(point, 0)] / 3600
     collected = np.where(came <= leave, np.maximum(came, stop_at), np.nan)
     return {"fly": fly.copy(), "nodes": nodes, "drone_stop": drone_stop, "length": length, "start": start,
-            "at": at, "collected": collected, "trucks": len(routes),
+            "at": at, "collected": collected, "trucks": len(routes), "routes": routes, "shift": shift,
+            "service": service, "back": back,
             "truck_hours": float(sum(b - dsp.SHIFT_START for b in back)), "km": metres / 1000}
 
 
@@ -189,7 +196,7 @@ def _fly(day, plan, spot, target):
         point = np.append(city.spot_pos[spot[i]], 0.0)[:3] + [0, 0, prime_air.DROP_HEIGHT]
         if not prime_air.flyable(day, launch[k]) or city.airspace.blocked([point], drop[k])[0]:
             failed[k] = True
-    return np.where(failed, np.nan, drop), failed
+    return np.where(failed, np.nan, drop), failed, 0.0
 
 
 def describe(r):
