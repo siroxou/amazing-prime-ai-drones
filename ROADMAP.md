@@ -50,7 +50,7 @@ Measured with `python -m sim.day` on an Apple Silicon laptop: the default city (
 
 Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,000. Curving streets leave more open ground than a grid. Most of the day's settings are reasoned guesses rather than public figures; [docs/days.md](docs/days.md) marks which are which.
 
-## Phase 2: Baselines ← in progress
+## Phase 2: Baselines ✓
 
 - [x] **Amazon DSP vans:** loadout at the delivery station, one van and driver per route, routes planned by OR-Tools (so the driver gets a good route for free), driving at the speed limit with traffic, a service time per stop for parking, walking to the door and back, and a shift length cap. Every setting comes from public figures with a range, listed in [docs/amazon-baseline.md](docs/amazon-baseline.md), and results are reported against the fast end (`baselines/dsp.py`, results in [results/dsp-baseline.md](results/dsp-baseline.md))
 - [x] **Calibration:** with the DSP settings, a 10-hour route in each density preset should land in the publicly reported range of stops and packages per route. If it doesn't, the city or the settings are wrong, and that gets fixed before anything is compared. **Passed**: 166–209 s per stop puts both districts in range ([results/dsp-calibration.md](results/dsp-calibration.md))
@@ -62,7 +62,7 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 
 **Exit:** the DSP calibration passes, and all baselines run on the full held-out set in under 10 minutes on a laptop, with results in `results/baselines.md`.
 
-So far: the calibration passes and [results/baselines.md](results/baselines.md) has every baseline side by side, but run one after the other they take about 25 minutes, so the time part fails. Next: run the days in parallel.
+**Passed.** The calibration passes, and `python -m baselines.run` runs every baseline on all 50 held-out days in **6.3 minutes on 6 workers** (2.1 minutes on 18), writing the side-by-side table in [results/baselines.md](results/baselines.md). Run to run, OR-Tools' fixed time per solve moves the vans' results by up to about 10 minutes, so smaller gaps between systems don't count.
 
 ## Phase 3: Drone cost model and drop planning
 

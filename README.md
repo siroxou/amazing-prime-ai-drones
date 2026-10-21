@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phase 2 is nearly done. The 3D city and random delivery days are in (Phase 1). So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a first classical solver for the full truck + drone fleet. Left in Phase 2: making the benchmarks fast enough. Then the drone cost model, the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phases 1 and 2 are done. The 3D city and random delivery days are in. So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a first classical solver for the full truck + drone fleet, with drones that can launch from a moving truck. Everything runs on the 50 held-out days in about 6 minutes. Next is Phase 3: a real drone cost model with wind, payload and battery, and drop planning. After that come the optimiser and the drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -90,11 +90,13 @@ The same 50 held-out days for every system, averaged ([results/baselines.md](res
 
 | system | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
 |---|---|---|---|---|---|---|
-| Amazon DSP vans | 100% | 15:46 | 12:57 | 69% | 2 vans | 12.5 |
-| Amazon Prime Air (10 drones) plus vans | 100% | 16:26 | 12:41 | 73% | 1.1 vans | 7.2 |
-| Locker trucks, no drones (10 min wait) | 82% | 12:17 | 11:23 | 82% | 3 trucks | 0 |
+| Amazon DSP vans | 100% | 15:46 | 12:54 | 70% | 2 vans | 12.5 |
+| Amazon Prime Air (10 drones) plus vans | 100% | 16:26 | 12:44 | 72% | 1.1 vans | 7.2 |
+| Locker trucks, no drones (10 min wait) | 82% | 12:17 | 11:24 | 82% | 3 trucks | 0 |
 | **Trucks with 10 drones each, classical solver** | 90% | 11:45 | 10:58 | 90% | 2 trucks | 0 |
 | **The same, launching from the moving truck** | 90% | 11:43 | 10:52 | 90% | 2 trucks | 0 |
+
+`python -m baselines.run` reruns this table in about 6 minutes. Results move by up to about 10 minutes from run to run, because OR-Tools gets a fixed time per solve.
 
 The truck + drone fleet finishes about four hours before the vans. But it leaves 10% of parcels behind: locker parcels whose recipients didn't come out in time. Its drone model is still the simple fixed-speed one, and much of what it depends on is guessed. [results/baselines.md](results/baselines.md) lists what to trust and what not to. The sections below explain each system.
 
@@ -220,6 +222,7 @@ pip install -r requirements.txt -r requirements-train.txt
 pytest tests
 python -m sim.city       # build a city, print what's in it, time the raycasts
 python -m sim.day        # build a delivery day: parcels, weather, traffic
+python -m baselines.run              # every baseline on the 50 held-out days, in parallel (about 6 min)
 python -m baselines.calibrate        # check the DSP van model against Amazon's figures (about 10 min)
 python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
 python -m baselines.prime_air --held-out   # Prime Air at 5, 10 and 20 drones (about 15 min)
@@ -243,6 +246,7 @@ baselines/prime_air.py  Amazon Prime Air drones from a fixed site, vans for the 
 baselines/trucks_only.py  this project's trucks and lockers without the drones
 baselines/classical.py  this project's truck + drone fleet, planned with heuristics and OR-Tools
 baselines/moving.py  drones launching from and landing on the moving truck
+baselines/run.py     runs every baseline on the held-out days in parallel
 results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
