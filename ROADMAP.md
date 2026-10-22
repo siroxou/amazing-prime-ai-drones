@@ -56,7 +56,7 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 - [x] **Calibration:** with the DSP settings, a 10-hour route in each density preset should land in the publicly reported range of stops and packages per route. If it doesn't, the city or the settings are wrong, and that gets fixed before anything is compared. **Passed**: 166–209 s per stop puts both districts in range ([results/dsp-calibration.md](results/dsp-calibration.md))
 - [x] **Prime Air from fixed sites:** drones flying from the delivery station or a drone site, with the published payload and radius limits. Parcels out of range or too heavy go by DSP van. Shows whether launching from a moving truck beats launching from a fixed site (`baselines/prime_air.py`, results in [results/prime-air-baseline.md](results/prime-air-baseline.md))
 - [x] **Autonomous trucks, no drones:** every parcel goes in the truck's locker and recipients collect it at stops along the route. Shows how much of any gain comes from the drones (`baselines/trucks_only.py`, results in [results/trucks-only-baseline.md](results/trucks-only-baseline.md))
-- [x] **Classical truck + drone solver:** launch stops, drone sortie scheduling and truck routing with OR-Tools plus construction heuristics, with a simple fixed-speed drone model for now; it moves to the Phase 3 cost model when that's in (`baselines/classical.py`, results in [results/classical-solver.md](results/classical-solver.md))
+- [x] **Classical truck + drone solver:** launch stops, drone sortie scheduling and truck routing with OR-Tools plus construction heuristics, first with a fixed-speed drone model and now with the Phase 3 cost model (`baselines/classical.py`, results in [results/classical-solver.md](results/classical-solver.md))
 - [x] Drones that launch from a moving truck and land on it further along the route (`baselines/moving.py`, results in [results/moving-launch.md](results/moving-launch.md)). It saves only a few minutes here, because the trucks spend most of their time parked for the locker
 - [x] Metrics per day: time until the last parcel is delivered, share delivered by a set time, average time from station to doorstep, parcels per hour per vehicle, driver hours, distance driven, drone energy, parcels that went by locker and why, and how long locker recipients waited and walked
 
@@ -64,12 +64,14 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 
 **Passed.** The calibration passes, and `python -m baselines.run` runs every baseline on all 50 held-out days in **6.3 minutes on 6 workers** (2.1 minutes on 18), writing the side-by-side table in [results/baselines.md](results/baselines.md). Run to run, OR-Tools' fixed time per solve moves the vans' results by up to about 10 minutes, so smaller gaps between systems don't count.
 
-## Phase 3: Drone cost model and drop planning
+## Phase 3: Drone cost model and drop planning ✓
 
-- [ ] 3D path planner over each neighbourhood: shortest safe path between launch, drop and recovery points, keeping clear of power lines, trees and buildings, with separate climb, cruise and descent legs
-- [ ] Time and energy per sortie from distance, climb, payload weight, parcel size (drag) and wind along the path. Calibrated against the micro sim in Phase 5
-- [ ] Drop planning per parcel: pick the drop spot and release height. Lower and slower for fragile parcels and gusty wind, a winch lowering for balconies and tight yards, and the wind drift on release accounted for. Some drop spots get ruled out in strong wind
-- [ ] Payload limits: parcels too big or heavy for a drone go in the truck's locker instead
+- [x] Flight paths: climb, cruise and descent legs, with a height profile that clears roofs, trees, wires, cranes and pylons by 10 m and follows the airspace rules, bent round no-fly zones (`sim/drone.py`)
+- [ ] A full 3D search for paths that go round obstacles sideways instead of over them
+- [x] Time and energy per sortie from distance, climb, payload weight, parcel size (drag) and wind, with a battery that holds less in the cold ([docs/drone-model.md](docs/drone-model.md)). To be calibrated against the micro sim in Phase 5
+- [x] Drop planning per parcel: pick the drop spot and release height. Lower and slower for fragile parcels and gusty wind, a winch lowering for balconies and tight yards, and the wind drift on release accounted for. Some drop spots get ruled out in strong wind
+- [x] Payload limits: parcels too big or heavy for a drone go in the truck's locker instead
+- [x] The classical solver and moving launches use all of it
 
 ## Phase 3b: Truck locker
 
@@ -81,6 +83,8 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 **Exit:** on held-out days, every oversized parcel is either collected or reported as returned, and the waiting time at pickup points is included in the fleet's delivery time.
 
 **Exit:** the classical solver from Phase 2 using this cost model beats the Amazon DSP baseline on the held-out days, or the gap is written up honestly.
+
+**Result: a split verdict, written up.** On the 50 held-out days the fleet gets 86% of parcels out by 14:00, against about 65–70% for the vans, and finishes around noon instead of mid-afternoon. But it leaves 14% behind, while the vans deliver everything. Wind is the main limit: drones take 36% of parcels, down from 46% with the fixed-speed model ([results/baselines.md](results/baselines.md), [docs/drone-model.md](docs/drone-model.md)).
 
 ## Phase 4: Learned optimiser
 

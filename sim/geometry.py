@@ -227,6 +227,18 @@ class Obstacles:
         p = np.asarray(point, float)
         if p[2] - self.terrain.height(p[0], p[1]) < radius:
             return "ground"
+        ids, gap = self._gaps(p, radius)
+        if len(gap) == 0 or gap.min() >= radius:
+            return None
+        return str(self.kind[ids[gap.argmin()]])
+
+    def room(self, point, upto):
+        """Distance from `point` to the nearest obstacle (not the ground), up to `upto`."""
+        _, gap = self._gaps(np.asarray(point, float), upto)
+        return float(min(gap.min(initial=upto), upto))
+
+    def _gaps(self, p, radius):
+        """Ids of the primitives near p, and the gap from p to each."""
         ids = self.near(p[:2] - radius, p[:2] + radius)
         gap = np.full(len(ids), np.inf)
         isb = ids < self.nb
@@ -245,9 +257,7 @@ class Obstacles:
         v = self.wire_q[w] - self.wire_p[w]
         t = np.clip(((p - self.wire_p[w]) * v).sum(1) / (v * v).sum(1), 0, 1)
         gap[isw] = np.linalg.norm(self.wire_p[w] + v * t[:, None] - p, axis=1) - self.wire_r[w]
-        if len(gap) == 0 or gap.min() >= radius:
-            return None
-        return str(self.kind[ids[gap.argmin()]])
+        return ids, gap
 
     def overhead(self, points, ceiling=100.0, chunk=32):
         """Clear height straight above each point, up to `ceiling`. Nearby points should be next

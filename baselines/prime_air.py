@@ -52,30 +52,10 @@ def drop_spots(city):
     return best
 
 
-def _walls(city, hour):
-    """No-fly zones a drone can't fly over or under at this hour, as circles (centre, radius).
-    ponytail: a rectangle is treated as the circle around it; only the runway is one of these."""
-    sky = city.airspace
-    on = sky.active & (sky.hours[:, 0] <= hour) & (hour < sky.hours[:, 1])
-    wall = on & (sky.floor < UNDER_HEIGHT) & (sky.ceiling > MAX_HEIGHT)
-    radius = np.where(sky.circle, sky.half[:, 0], np.hypot(*sky.half.T))
-    return sky.centre[wall], radius[wall]
-
-
 def path_length(city, a, b, hour):
-    """Flight distance from a to b going round no-fly walls, or None if b is inside one.
-    ponytail: goes round each circle on its own; overlapping walls would need a real planner."""
-    centres, radii = _walls(city, hour)
-    ab = b - a
-    length = float(np.linalg.norm(ab))
-    for c, r in zip(centres, radii):
-        if np.linalg.norm(b - c) < r:
-            return None
-        t = np.clip((c - a) @ ab / max(ab @ ab, 1e-9), 0, 1)
-        d = float(np.linalg.norm(a + t * ab - c))
-        if d < r:
-            length += 2 * r * np.arccos(d / r) - 2 * np.sqrt(r * r - d * d)  # the arc instead of the chord
-    return length
+    """Flight distance from a to b going round no-fly zones a Prime Air drone can't fly over or under,
+    or None if b is inside one."""
+    return city.airspace.route_length(a, b, hour, UNDER_HEIGHT, MAX_HEIGHT)
 
 
 def ground_speeds(day, site, heading, hour):

@@ -18,15 +18,14 @@ def calm(day, monkeypatch):
     monkeypatch.setattr(day, "weather", w)
 
 
-def test_drop_spots_need_open_sky(day):
+def test_drone_parcels_are_light_small_and_have_somewhere_to_go(day):
+    spot = cl.drop_spots(day)
+    has = spot >= 0
     city = day.city
-    spots = cl.drone_spots(city)
-    has = spots >= 0
-    assert (city.spot_overhead[spots[has]] >= 100).all()
-    assert (city.spot_address[spots[has]] == np.flatnonzero(has)).all()
-    flats = has & (city.address_kind == "apartment")
-    assert flats.any() and (city.spot_kind[spots[flats]] == "balcony").all()  # top floors only
-    assert not (has & (city.address_kind == "apartment") & (city.address_floor < 3)).all()
+    assert has.mean() > 0.2
+    assert (day.parcel_weight[has] <= cl.PAYLOAD).all() and np.isin(day.parcel_size[has], cl.SIZES).all()
+    assert (city.spot_address[spot[has]] == day.parcel_address[has]).all()
+    assert (city.spot_overhead[spot[has]] >= 100).all()
 
 
 def test_sorties_are_shared_out_longest_first():

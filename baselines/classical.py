@@ -1,6 +1,6 @@
 """Classical truck + drone solver: the project's own system, planned with plain heuristics and
-OR-Tools, and a fixed-speed drone model. This is the first version of the fleet, and the bar a
-learned optimiser will have to beat.
+OR-Tools, with the drone cost model in sim/drone.py. This is the first version of the fleet, and
+the bar a learned optimiser will have to beat.
 
 Each autonomous truck carries DRONES drones and a locker. It leaves the distribution centre
 and parks at a series of stops. At each stop its drones fly out to the parcels assigned to
@@ -8,8 +8,8 @@ that stop and come back to it, and recipients of locker parcels near the stop wa
 collect them. The truck moves on when the last drone is back and the locker wait is over.
 
     1. Every parcel a drone can take goes by drone: light enough, small enough, and an address
-       with a drop spot that has open sky and room around it (yards and porches), or a top-floor
-       balcony it can lower the parcel onto from above.
+       where it can drop, lower or set the parcel down in the day's wind (sim/drone.py drop
+       planning), checked at midday.
     2. Locker parcels get pickup points, as in the trucks-only baseline.
     3. Drone parcels are flown from the nearest pickup point within LAUNCH_RADIUS. The rest get
        new launch stops, chosen greedily to cover as many of them as possible.
@@ -19,9 +19,9 @@ collect them. The truck moves on when the last drone is back and the locker wait
        time the truck gets there become locker parcels, and the day is planned again once
        (the weather forecast is taken as known, as for Prime Air).
 
-The drone model is deliberately simple, a fixed cruise speed with fixed times to launch, drop
-and land; the full cost model with wind, payload and energy comes in Phase 3. Every setting
-here is a guess, and they're all in this file.
+Each flight's time and battery come from the cost model: its height over the rooftops and
+wires, the parcel's weight and size, and the wind at the hour it flies. Every setting is a
+guess, here and in sim/drone.py.
 
     python -m baselines.classical                  # one day in the default city
     python -m baselines.classical --held-out       # the 50 held-out days
@@ -33,45 +33,29 @@ import numpy as np
 
 from baselines import dsp, prime_air, trucks_only
 from baselines.dsp import _clock
+from sim import drone
 
 DRONES = 10  # per truck
-SPEED = 15.0  # m/s cruise, fixed
 PAYLOAD = 5.0  # kg
 SIZES = ("envelope", "small", "medium", "large")
-RANGE = 3000.0  # m, furthest a drop can be from the truck
-CLEAR = 1.5  # m clear around a yard or porch drop
-WINCH_HEIGHT, DRONE_RADIUS = 5.0, 0.7  # m: hovering height over a balcony, and room the drone needs
-LAUNCH_LAND = 60.0  # s to take off from the truck and land back on it
-DROP = 30.0  # s to come down, lower the parcel and climb back
+RANGE = 3000.0  # m, furthest a drop can be from the truck (radio range)
 TURNAROUND = 60.0  # s on the truck to load the next parcel and swap the battery
+PLAN_HOUR = 13.0  # the weather the plan is made for; each flight is checked again at the hour it flies
 LAUNCH_RADIUS = 600.0  # m: drone parcels further than this from any pickup point get a launch stop of their own
 CAPACITY = 300  # parcels a truck carries, locker and drone parcels together
 WINDOW = trucks_only.WINDOW  # minutes the locker waits at a stop, at least
 RADII = (300.0, 600.0, 1000.0)  # launch radii tried on the held-out days
-PREFERENCE = ("back_yard", "front_yard", "porch", "balcony")
 
 
-def drone_spots(city):
-    """For each address, the spot a drone lowers its parcel onto, or -1: the first of PREFERENCE with
-    open sky above. In a yard or on a porch the drone comes down low, so it needs nothing within CLEAR
-    from half a metre up. On a balcony it hovers WINCH_HEIGHT above and lowers the parcel on a line, so
-    it needs room for itself up there. Covered balconies don't count: nothing can come down onto them."""
-    best = np.full(len(city.address_kind), -1)
-    for kind in PREFERENCE[::-1]:  # most preferred last, so it wins
-        lift, room = (WINCH_HEIGHT, DRONE_RADIUS) if kind == "balcony" else (0.5 + CLEAR, CLEAR)
-        for s in np.flatnonzero(city.spot_kind == kind):
-            if city.spot_overhead[s] >= 100 and city.obstacles.touching(city.spot_pos[s] + [0, 0, lift], room) is None:
-                best[city.spot_address[s]] = s
-    return best
-
-
-def sortie_seconds(distance):
-    """Whole cycle for one parcel: out, drop, back, reload."""
-    return LAUNCH_LAND + 2 * distance / SPEED + DROP + TURNAROUND
-
-
-def to_drop_seconds(distance):
-    return LAUNCH_LAND / 2 + distance / SPEED + DROP / 2
+def drop_spots(day):
+    """For each parcel, the spot its quickest drop option uses at PLAN_HOUR, or -1 if no drone can take it."""
+    ok = (day.parcel_weight <= PAYLOAD) & np.isin(day.parcel_size, SIZES)
+    spot = np.full(len(day.parcel_address), -1)
+    for i in np.flatnonzero(ok):
+        options = drone.drop_options(day, i, PLAN_HOUR)
+        if options:
+            spot[i] = options[0][1]
+    return spot
 
 
 def share_out(cycles, drones=DRONES):
@@ -116,9 +100,9 @@ def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS, 
     fly_them = on_the_move.fly if moving else _fly
     city = day.city
     n = len(day.parcel_address)
-    spot = drone_spots(city)[day.parcel_address]
+    spot = drop_spots(day)
     target = city.spot_pos[np.maximum(spot, 0), :2]
-    fly = (spot >= 0) & (day.parcel_weight <= PAYLOAD) & np.isin(day.parcel_size, SIZES)
+    fly = spot >= 0
     for attempt in range(2):
         plan = _plan(day, fly, target, radius, window, seconds, parked=not moving)
         drop_time, failed, extra = fly_them(day, plan, spot, target)
@@ -147,14 +131,15 @@ def _plan(day, fly, target, radius, window, seconds, parked=True):
     base, point, walk = trucks_only.pickup_points(city, day, ~fly)
     nodes, drone_stop = launch_stops(city, target[fly], base, radius)
     stop_xy = city.nodes[nodes]
-    length = np.array([prime_air.path_length(city, stop_xy[s], target[i], 13.0) or np.inf
-                       for s, i in zip(drone_stop, np.flatnonzero(fly))])
-    length[np.linalg.norm(target[fly] - stop_xy[drone_stop], axis=1) > RANGE] = np.inf
+    flying = np.flatnonzero(fly)
+    trips = [drone.sortie(day, stop_xy[s], i, PLAN_HOUR)
+             if np.linalg.norm(target[i] - stop_xy[s]) <= RANGE else None for s, i in zip(drone_stop, flying)]
+    cycle = np.array([t["seconds"] + TURNAROUND if t else np.inf for t in trips])
     dwell = np.zeros(len(nodes))
-    start = np.zeros(int(fly.sum()))
+    start = np.zeros(len(flying))
     for s in range(len(nodes)):
-        mine = np.flatnonzero((drone_stop == s) & np.isfinite(length))
-        start[mine], busy = share_out(sortie_seconds(length[mine]))
+        mine = np.flatnonzero((drone_stop == s) & np.isfinite(cycle))
+        start[mine], busy = share_out(cycle[mine])
         dwell[s] = busy if parked else 0.0
     dwell[np.unique(point[point >= 0])] = np.maximum(dwell[np.unique(point[point >= 0])], window * 60)
     dwell = np.maximum(dwell, 60.0)  # at least a minute to park and set off again
@@ -177,26 +162,30 @@ def _plan(day, fly, target, radius, window, seconds, parked=True):
     came = stop_at - trucks_only.NOTICE / 60 + ready
     leave = stop_at + dwell[np.maximum(point, 0)] / 3600
     collected = np.where(came <= leave, np.maximum(came, stop_at), np.nan)
-    return {"fly": fly.copy(), "nodes": nodes, "drone_stop": drone_stop, "length": length, "start": start,
+    return {"fly": fly.copy(), "nodes": nodes, "drone_stop": drone_stop, "cycle": cycle, "start": start,
             "at": at, "collected": collected, "trucks": len(routes), "routes": routes, "shift": shift,
             "service": service, "back": back,
             "truck_hours": float(sum(b - dsp.SHIFT_START for b in back)), "km": metres / 1000}
 
 
 def _fly(day, plan, spot, target):
-    """Drop time of each planned drone parcel, and which ones can't fly when the truck gets there."""
+    """Drop time of each planned drone parcel, and which ones can't fly when the truck gets there:
+    each flight is worked out again for the wind and temperature at the hour it actually takes off."""
     city = day.city
     flown = np.flatnonzero(plan["fly"])
     launch = plan["at"][plan["drone_stop"]] + plan["start"] / 3600
-    drop = launch + to_drop_seconds(plan["length"]) / 3600
-    failed = ~np.isfinite(drop)
+    drop = np.full(len(flown), np.nan)
     for k, i in enumerate(flown):
-        if failed[k]:
+        if not (np.isfinite(plan["cycle"][k]) and np.isfinite(launch[k]) and prime_air.flyable(day, launch[k])):
             continue
-        point = np.append(city.spot_pos[spot[i]], 0.0)[:3] + [0, 0, prime_air.DROP_HEIGHT]
-        if not prime_air.flyable(day, launch[k]) or city.airspace.blocked([point], drop[k])[0]:
-            failed[k] = True
-    return np.where(failed, np.nan, drop), failed, 0.0
+        trip = drone.sortie(day, city.nodes[plan["nodes"][plan["drone_stop"][k]]], i, launch[k])
+        if trip is None:
+            continue
+        when = launch[k] + trip["to_drop"] / 3600
+        point = city.spot_pos[trip["spot"]] + [0, 0, trip["height"]]
+        if not city.airspace.blocked([point], when)[0]:
+            drop[k] = when
+    return drop, np.isnan(drop), 0.0
 
 
 def describe(r):
@@ -209,7 +198,7 @@ def describe(r):
 
 def main():
     from sim.city import City
-    from sim.day import HELD_OUT, Day
+    from sim.day import Day
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--seed", type=int, default=0)
@@ -220,14 +209,14 @@ def main():
     if not a.held_out:
         print(describe(solve(Day(City(a.seed, day=a.day)), a.radius)))
         return
-    rows = []
-    for seed, d in HELD_OUT:
-        day = Day.load(Path("data/held-out") / f"city{seed}-day{d}.npz", City(seed, day=d))
-        for radius in RADII:
-            r = solve(day, radius)
-            rows.append((seed, d, r))
-            print(seed, d, describe(r), flush=True)
+    from baselines.run import over_held_out
+
+    rows = [(seed, d, r) for seed, d, rs in over_held_out(_every_radius) for r in rs]
     _write_results(rows)
+
+
+def _every_radius(day):
+    return [solve(day, radius) for radius in RADII]
 
 
 def _write_results(rows):
@@ -251,7 +240,7 @@ def _write_results(rows):
         "",
         f"Written by `python -m baselines.classical --held-out`. {len({(s, d) for s, d, _ in rows})} days, 500 "
         f"parcels each, averages over the days. Autonomous trucks with {DRONES} drones and a locker each; a "
-        f"fixed-speed drone model ({SPEED:.0f} m/s, up to {PAYLOAD:.0f} kg, {RANGE / 1000:.0f} km from the truck). "
+        f"drone cost model (sim/drone.py: wind, payload, battery, flight heights, drop planning; up to {PAYLOAD:.0f} kg). "
         "Locker settings as in [trucks-only-baseline.md](trucks-only-baseline.md) with a 10-minute wait. "
         "Settings are in `baselines/classical.py`.",
         "",

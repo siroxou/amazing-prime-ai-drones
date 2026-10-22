@@ -55,6 +55,19 @@ def one_day(seed_day):
     return out
 
 
+def _load_and_run(job):
+    fn, seed, d = job
+    return fn(Day.load(Path("data/held-out") / f"city{seed}-day{d}.npz", City(seed, day=d)))
+
+
+def over_held_out(fn, workers=None):
+    """fn(day) on every held-out day, days in parallel. fn must be a module-level function.
+    Returns [(city seed, day number, fn's result)] in HELD_OUT order."""
+    with ProcessPoolExecutor(workers or os.cpu_count()) as pool:
+        results = pool.map(_load_and_run, [(fn, s, d) for s, d in HELD_OUT])
+        return [(s, d, r) for (s, d), r in zip(HELD_OUT, results)]
+
+
 def table(days, workers, minutes):
     lines = [
         START,

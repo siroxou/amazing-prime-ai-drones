@@ -5,12 +5,17 @@ locker parcels, the same pickup points and launch waypoints, the same OR-Tools r
 difference is that a truck no longer waits for its drones. It stops only as long as its
 locker needs (a minute at a launch waypoint) and drives on.
 
-Each drone takes off from wherever the truck is, flies to its parcel, lowers it, and flies
+Each drone takes off from wherever the truck is, flies to its parcel, puts it down, and flies
 to meet the truck where it will be by then, landing on it on the move. For each parcel, in
 the order the truck passes closest to it, the drone that's free soonest is sent, at the
 launch time (from up to LEAD before the truck's closest pass) that gets it back on the truck
 soonest. A drone isn't sent if it would be out of RANGE of the truck at the drop, couldn't
-catch the truck within ENDURANCE, or would land after the end of the shift.
+catch the truck before its battery runs down, or would land after the end of the shift.
+
+The drone's speeds over the ground, its time climbing, putting the parcel down and coming in
+to land, and its battery draw come from the cost model (sim/drone.py) for a round trip from
+where the truck passes closest, at that hour. ponytail: the wind is taken along that line,
+not the actual one, and the rendezvous leg flies straight at the truck.
 
 Truck positions come from its real route along the roads, spread evenly in time along each
 leg. ponytail: real trucks slow for junctions; the drone aims at the average position.
@@ -24,10 +29,11 @@ from pathlib import Path
 import numpy as np
 
 from baselines import classical, dsp, prime_air
-from baselines.classical import DROP, DRONES, LAUNCH_LAND, RANGE, SPEED, TURNAROUND
+from baselines.classical import DRONES, RANGE, TURNAROUND
+from sim import drone
 from sim.roads import Paths
 
-ENDURANCE = 25.0  # minutes in the air on one battery, guess
+ENDURANCE = 40.0  # minutes: the longest any flight is looked at; the battery usually ends it sooner
 LEAD = 15.0  # minutes before the truck's closest pass a drone may set off
 TICK = 10.0  # seconds between the truck positions the drones plan against
 
@@ -99,20 +105,25 @@ def fly(day, plan, spot, target):
             go = np.arange(first, min(first + 3 * int(LEAD * 60 / TICK), len(grid) - 1), 3)
             if len(go) == 0:
                 continue
+            i = flown[mine[m]]
+            trip = drone.sortie(day, where[closest[m]], i, grid[closest[m]])
+            if trip is None:
+                continue
+            seconds_up = drone.usable_wh(day.weather_at(grid[closest[m]])["temp_c"]) / trip["watts"] * 3600
             out = far[m, go]
-            at_drop = grid[go] + (LAUNCH_LAND / 2 + out / SPEED) / 3600 + DROP / 3600
+            done = grid[go] + (trip["fixed_out"] + out / trip["speed_out"]) / 3600  # parcel down, heading back
             later = np.minimum(go[:, None] + np.arange(1, steps)[None], len(grid) - 1)
-            catch = (grid[later] >= at_drop[:, None]) & \
-                    (far[m, later] <= SPEED * (grid[later] - at_drop[:, None]) * 3600)
+            flying = (grid[later] - done[:, None]) * 3600 - trip["fixed_back"]
+            catch = (flying >= 0) & (far[m, later] <= trip["speed_back"] * flying)
             reached = catch.any(1)
-            land = grid[later[np.arange(len(go)), catch.argmax(1)]] + LAUNCH_LAND / 2 / 3600
-            good = reached & (out <= RANGE) & ok_weather[go] & (land <= end) & (land - grid[go] <= ENDURANCE / 60)
+            land = grid[later[np.arange(len(go)), catch.argmax(1)]]
+            good = reached & (out <= RANGE) & ok_weather[go] & (land <= end) & \
+                (land - grid[go] <= min(ENDURANCE * 60, seconds_up) / 3600)
             if not good.any():
                 continue
             c = int(np.argmin(np.where(good, land, np.inf)))
-            when = grid[go[c]] + (LAUNCH_LAND / 2 + out[c] / SPEED + DROP / 2) / 3600
-            i = flown[mine[m]]
-            point = np.append(city.spot_pos[spot[i]], 0.0)[:3] + [0, 0, prime_air.DROP_HEIGHT]
+            when = done[c]
+            point = city.spot_pos[trip["spot"]] + [0, 0, trip["height"]]
             if prime_air.path_length(city, where[go[c]], target[i], when) is None or \
                     city.airspace.blocked([point], when)[0]:
                 continue
@@ -126,7 +137,7 @@ def fly(day, plan, spot, target):
 
 def main():
     from sim.city import City
-    from sim.day import HELD_OUT, Day
+    from sim.day import Day
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--seed", type=int, default=0)
@@ -138,14 +149,14 @@ def main():
         for moving in (False, True):
             print(("moving: " if moving else "parked: ") + classical.describe(classical.solve(day, moving=moving)))
         return
-    rows = []
-    for seed, d in HELD_OUT:
-        day = Day.load(Path("data/held-out") / f"city{seed}-day{d}.npz", City(seed, day=d))
-        for moving in (False, True):
-            r = classical.solve(day, moving=moving)
-            rows.append((seed, d, r))
-            print(seed, d, "moving" if moving else "parked", classical.describe(r), flush=True)
+    from baselines.run import over_held_out
+
+    rows = [(seed, d, r) for seed, d, rs in over_held_out(_both) for r in rs]
     _write_results(rows)
+
+
+def _both(day):
+    return [classical.solve(day, moving=moving) for moving in (False, True)]
 
 
 def _write_results(rows):
@@ -170,13 +181,26 @@ def _write_results(rows):
         "",
         f"Written by `python -m baselines.moving --held-out`. {len({(s, d) for s, d, _ in rows})} days, 500 "
         "parcels each, averages over the days. Both columns use the classical solver's plan (600 m launch radius, "
-        "10-minute locker wait, fixed-speed drones). Parked: the truck waits at each stop until its drones are "
+        "10-minute locker wait, drones on the cost model in sim/drone.py). Parked: the truck waits at each stop until its drones are "
         "back. Moving: it only waits for the locker, and the drones launch from it and land on it as it drives, "
-        f"with {ENDURANCE:.0f} minutes in the air per battery.",
+        f"with the battery set by the drone cost model.",
         "",
         "| | parked launches | moving launches |",
         "|---|---|---|",
     ] + [f"| {name} | {stat(False, f, fmt)} | {stat(True, f, fmt)} |" for name, f, fmt in measures] + [
+        "",
+        "## What it shows",
+        "",
+        "Launching from a moving truck changes the day by only a few minutes, either way. The trucks spend most "
+        "of their day parked at locker pickup points: every drone parcel is already within the launch radius of "
+        "one, so there are no stops just for launching. Each truck waits about 10 minutes at each of its 10 or "
+        "so points, with short drives between. A drone's flight is a few minutes, so it's usually back while the "
+        "truck is still there. When the truck doesn't wait for its drones, it leaves sooner, but the drones then "
+        "have further to fly to catch it and are busy for longer, so the two roughly cancel out.",
+        "",
+        "In this city the locker wait, not the drones, is what holds the trucks up. Moving launches should "
+        "matter more where trucks drive further between stops: bigger cities, fewer locker parcels, or shorter "
+        "locker waits.",
         "",
         "## Every day",
         "",
