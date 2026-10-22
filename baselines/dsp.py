@@ -59,10 +59,11 @@ class Shift:
         return self.hourly[min(max(int(clock), self.hours[0]), self.hours[-1])][i, j]
 
 
-def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS, load=None, capacity=None):
+def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS, load=None, capacity=None, horizon=None):
     """Routes for up to `vans` vans that all fit in the shift, or None if OR-Tools finds none.
     With optional=True, stops may be left out (it then fits in as many as it can). With `load`
     (per stop, the station first) and `capacity`, no route carries more than `capacity`.
+    `horizon` is the seconds each route may take (default the shift after loadout).
     Each route is a list of stop indices (1..n) in driving order."""
     n = len(shift.nodes)
     cost = np.rint(shift.mean + service[None, :]).astype(int)  # drive from i to j, then deliver at j
@@ -72,7 +73,7 @@ def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS, load=None
     routing = pywrapcp.RoutingModel(manager)
     transit = routing.RegisterTransitCallback(lambda a, b: table[manager.IndexToNode(a)][manager.IndexToNode(b)])
     routing.SetArcCostEvaluatorOfAllVehicles(transit)
-    routing.AddDimension(transit, 0, int((SHIFT - LOADOUT) * 3600), True, "time")
+    routing.AddDimension(transit, 0, int((SHIFT - LOADOUT) * 3600 if horizon is None else horizon), True, "time")
     # Also keep the longest route short, so the work is shared out between the vans and the last
     # parcel goes out as early as it can. Real routes are balanced too.
     routing.GetDimensionOrDie("time").SetGlobalSpanCostCoefficient(BALANCE)
@@ -102,12 +103,12 @@ def plan(shift, service, vans, optional=False, seconds=SOLVER_SECONDS, load=None
     return routes
 
 
-def drive(shift, route, service):
+def drive(shift, route, service, start=None):
     """Drive a route with the traffic at the time of each leg. Returns ({stop: time delivered}, time back,
     metres driven). A stop that would make the van late back is skipped and its parcels go back to the
-    station, as a real driver would bring them back."""
+    station, as a real driver would bring them back. `start` is when it leaves (default after loadout)."""
     end = SHIFT_START + SHIFT
-    clock, at, done, metres = SHIFT_START + LOADOUT, 0, {}, 0.0
+    clock, at, done, metres = SHIFT_START + LOADOUT if start is None else start, 0, {}, 0.0
     for j in route:
         leave = clock + (shift.leg(at, j, clock) + service[j]) / 3600
         if leave + shift.leg(j, 0, leave) / 3600 > end:

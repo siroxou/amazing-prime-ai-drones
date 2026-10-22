@@ -31,6 +31,7 @@ EXTRA_PER_STOP = 0.45  # parcels per address is 1 + Poisson(0.45), about 1.45 on
 # Recipients, for parcels collected from the truck's locker
 WALK_MEDIAN, WALK_SPREAD, WALK_MAX = 250.0, 0.6, 800.0  # how far they'll walk to the truck, m
 REPLY_MEDIAN, REPLY_SPREAD = 10.0, 0.7  # minutes from being told the truck is there to turning up
+SECOND_SHOW = 1.0  # share of recipients who missed the truck that come out for a second notice, guess
 
 # Weather
 RAIN_CHANCE = 0.3
@@ -76,6 +77,16 @@ class Day:
         walk = np.minimum(WALK_MEDIAN * rng.lognormal(0, WALK_SPREAD, len(stops)), WALK_MAX)
         self.recipient_walk = walk[first]  # m
         self.recipient_reply = (REPLY_MEDIAN * rng.lognormal(0, REPLY_SPREAD, len(stops)))[first]  # minutes
+
+    def second_reply(self, show=None):
+        """Minutes each recipient takes to turn up after a second notice later in the day: a fresh draw from
+        the same spread, since an afternoon isn't a morning. Only a share `show` (default SECOND_SHOW) come
+        at all; the rest never do (inf). One per address, the same every time."""
+        rng = np.random.default_rng([self.seed, self.day, 3])
+        stops, first = np.unique(self.parcel_address, return_inverse=True)
+        minutes = REPLY_MEDIAN * rng.lognormal(0, REPLY_SPREAD, len(stops))
+        away = rng.random(len(stops)) >= (SECOND_SHOW if show is None else show)
+        return np.where(away, np.inf, minutes)[first]
 
     def weather_at(self, hour):
         """Weather at a time of day (0-24), interpolated between the hourly values."""

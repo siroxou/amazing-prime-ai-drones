@@ -25,8 +25,11 @@ Only matters for parcels too big for a drone, which go in the truck's locker. Ev
 |---|---|---|
 | How far they'll walk to the truck | log-normal, median 250 m, capped at 800 m | guess |
 | How soon they turn up after being told the truck is there | log-normal, median 10 minutes | guess |
+| Share of those who missed the truck who come out when it comes back in the afternoon | all (`SECOND_SHOW`) | guess, and the result depends on it a lot ([results/baselines.md](../results/baselines.md)) |
+| How soon they turn up the second time | log-normal, median 10 minutes, drawn fresh | guess |
+| How long the truck waits at each stop on that second visit | 20 minutes, after 15 minutes reloading at the station | guess |
 
-These two decide how well the locker works and have no public data behind them, so locker results get reported across a range of them.
+These decide how well the locker works and have no public data behind them, so locker results get reported across a range of them.
 
 The trucks-only baseline adds four more guesses: 10 minutes' warning before the truck arrives, a wait of 10, 20 or 30 minutes at each pickup point (all three are reported), walking at 1.3 m/s, and pavements 1.3 times the straight-line distance. Each locker has 200 compartments.
 

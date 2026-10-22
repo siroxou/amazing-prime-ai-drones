@@ -11,7 +11,7 @@ from sim.day import Day
 @pytest.fixture(scope="module")
 def solved():
     day = Day(City(seed=0), parcels=200)
-    r = cl.solve(day, seconds=1)
+    r = cl.solve(day, seconds=1, second=False)
     return day, r, rt.from_solve(day, r)
 
 
@@ -60,3 +60,12 @@ def test_hand_rule_waits_more_for_more_recipients_and_later_stops(solved):
     assert len(waits) == len(route.stops) and all(0 <= w <= wt.WAITS[-1] for w in waits)
     lockers = [len(s.locker_ready) for s in route.stops]
     assert waits[-1] * 60 == pytest.approx(min(lockers[-1] + 10.0, wt.WAITS[-1] * 60))
+
+
+def test_the_second_pass_replays_like_the_solver(solved):
+    day, r, plan = solved
+    replayed = rt.with_second_pass(plan, fixed(plan, cl.WINDOW), day)
+    direct, _ = cl.second_pass(day, cl.trucks_of(r["plan"]), r["parcel_time"])
+    assert np.isnan(replayed).sum() < np.isnan(r["parcel_time"]).sum()
+    # the second-pass routes are solved again, so allow OR-Tools a parcel or two of difference
+    assert abs(np.isnan(replayed).sum() - np.isnan(direct).sum()) <= 2

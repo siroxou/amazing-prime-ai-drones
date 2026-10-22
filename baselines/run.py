@@ -34,7 +34,9 @@ SYSTEMS = (
      lambda day: trucks_only.baseline(day, 10.0), "trucks"),
     ("Locker trucks, no drones, 30 min wait", "trucks-only-baseline.md",
      lambda day: trucks_only.baseline(day, 30.0), "trucks"),
-    ("Trucks with 10 drones each, classical solver, 600 m launch radius", "classical-solver.md",
+    ("Trucks with 10 drones each, classical solver, morning only", "classical-solver.md",
+     lambda day: classical.solve(day, second=False), "trucks"),
+    ("The same with an afternoon second pass for what's left", "classical-solver.md",
      lambda day: classical.solve(day), "trucks"),
     ("The same, drones launching from and landing on the moving truck", "moving-launch.md",
      lambda day: classical.solve(day, moving=True), "trucks"),
@@ -84,7 +86,7 @@ def table(days, workers, minutes):
                      f"{mean['driver_hours']:.1f} |")
     lines += ["", "Score: average hours from 10:00 until a parcel is delivered, a parcel not delivered today "
               "counting 24 hours; lower is better (optimiser/routes.py).", "",
-              f"All six over all {len(days)} days took {minutes:.1f} minutes on {workers} workers "
+              f"All {len(SYSTEMS)} over all {len(days)} days took {minutes:.1f} minutes on {workers} workers "
               "(`python -m baselines.run`).", "", END]
     return "\n".join(lines)
 

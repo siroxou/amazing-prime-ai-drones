@@ -169,6 +169,7 @@ def _write_results(rows):
         ("trucks", lambda r: r["trucks"], lambda v: f"{v:.1f}"),
         ("stops", lambda r: r["stops"], lambda v: f"{v:.0f}"),
         ("parcels delivered today", lambda r: np.mean(~np.isnan(r["parcel_time"])), lambda v: f"{v:.0%}"),
+        ("delivered on the afternoon second pass", lambda r: r["second_pass"] / len(r["parcel_time"]), lambda v: f"{v:.0%}"),
         ("by drone", lambda r: r["by_drone"], lambda v: f"{v:.0%}"),
         ("last parcel", lambda r: r["last"], dsp._clock),
         ("half of all parcels by", lambda r: half(r["parcel_time"]), dsp._clock),
@@ -183,7 +184,7 @@ def _write_results(rows):
         "parcels each, averages over the days. Both columns use the classical solver's plan (600 m launch radius, "
         "10-minute locker wait, drones on the cost model in sim/drone.py). Parked: the truck waits at each stop until its drones are "
         "back. Moving: it only waits for the locker, and the drones launch from it and land on it as it drives, "
-        f"with the battery set by the drone cost model.",
+        f"with the battery set by the drone cost model. Both include the afternoon second pass.",
         "",
         "| | parked launches | moving launches |",
         "|---|---|---|",

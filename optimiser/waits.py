@@ -131,31 +131,81 @@ def best_fixed(plans):
     return float(WAITS[int(np.argmin(scores))]), scores
 
 
+def waits_for(config, plan):
+    kind, value = config
+    return [[value] * len(r.stops) for r in plan.routes] if kind == "fixed" else [rule(*value)(r) for r in plan.routes]
+
+
+SECOND_GRID = [("fixed", w) for w in WAITS] + \
+    [("rule", (a, b)) for a in (0.0, 0.25, 0.5, 1.0) for b in (0, 10, 20)]
+
+
+def _day_of(plan):
+    from sim.city import City
+    from sim.day import HELD_OUT, Day
+
+    seed, d = plan.day_id
+    city = City(seed, day=d)
+    return Day.load(Path("data/held-out") / f"city{seed}-day{d}.npz", city) if (seed, d) in HELD_OUT else Day(city)
+
+
+def _second_pass_day(job):
+    """Summaries of one day with each set of waits, afternoon second pass included."""
+    plan, sets = job
+    day = _day_of(plan)
+    return {name: rt.summary(rt.with_second_pass(plan, waits, day)) for name, waits in sets.items()}
+
+
+def _over_days(plans, sets_for):
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor() as pool:
+        return list(pool.map(_second_pass_day, [(p, sets_for(p)) for p in plans]))
+
+
 def evaluate():
     from stable_baselines3 import PPO
 
     held, train_plans = rt.load(HELD_OUT_PATH), rt.load(TRAIN_PATH)
     tuned, train_scores = best_fixed(train_plans)
-    rows = {}
-    for name, wait in (("fixed 10 min (classical solver as published)", 10 / 60),
-                       (f"best fixed wait, tuned on training days ({tuned * 60:.0f} min)", tuned)):
-        rows[name] = [rt.summary(rt.day_times(p, [[wait] * len(r.stops) for r in p.routes])) for p in held]
     per_parcel, along = best_rule(train_plans)
-    rows[f"hand rule, tuned on training days ({per_parcel:g} min per locker parcel + up to {along:g} min along "
-         "the route)"] = [rt.summary(rt.day_times(p, [rule(per_parcel, along)(r) for r in p.routes])) for p in held]
-    learned = []
-    for seed in SEEDS:
-        path = Path(f"runs/optimiser/waits-seed{seed}.zip")
-        if not path.exists():
-            continue
-        model = PPO.load(path, device="cpu")
-        days = [rt.summary(rt.day_times(p, [policy_waits(model, r) for r in p.routes])) for p in held]
-        rows[f"learned waits, seed {seed}"] = days
-        learned.append(days)
-    _write(rows, learned, tuned, train_scores)
+    models = {seed: PPO.load(f"runs/optimiser/waits-seed{seed}.zip", device="cpu")
+              for seed in SEEDS if Path(f"runs/optimiser/waits-seed{seed}.zip").exists()}
+
+    # Tune the fixed wait and the hand rule again with the second pass in, on the training days.
+    tuning = _over_days(train_plans, lambda p: {str(c): waits_for(c, p) for c in SECOND_GRID})
+    scores = {str(c): np.mean([d[str(c)]["score"] for d in tuning]) for c in SECOND_GRID}
+    best2_fixed = min((c for c in SECOND_GRID if c[0] == "fixed"), key=lambda c: scores[str(c)])
+    best2_rule = min((c for c in SECOND_GRID if c[0] == "rule"), key=lambda c: scores[str(c)])
+
+    def sets(p):
+        out = {"fixed 10 min (classical solver as published)": waits_for(("fixed", 10 / 60), p),
+               f"best fixed wait, tuned on training days ({tuned * 60:.0f} min)": waits_for(("fixed", tuned), p),
+               f"hand rule, tuned on training days ({per_parcel:g} min per locker parcel + up to {along:g} min along "
+               "the route)": waits_for(("rule", (per_parcel, along)), p)}
+        out.update({f"learned waits, seed {s}": [policy_waits(m, r) for r in p.routes] for s, m in models.items()})
+        return out
+
+    morning = {}
+    for p in held:
+        for name, waits in sets(p).items():
+            morning.setdefault(name, []).append(rt.summary(rt.day_times(p, waits)))
+    learned = [morning[n] for n in morning if n.startswith("learned")]
+
+    def sets2(p):
+        out = sets(p)
+        out[f"best fixed wait, tuned with the second pass ({best2_fixed[1] * 60:.0f} min)"] = waits_for(best2_fixed, p)
+        a, b = best2_rule[1]
+        out[f"hand rule, tuned with the second pass ({a:g} min per locker parcel + up to {b:g} min along the route)"] \
+            = waits_for(best2_rule, p)
+        return out
+
+    days = _over_days(held, sets2)
+    afternoon = {name: [d[name] for d in days] for name in days[0]}
+    _write(morning, learned, tuned, train_scores, afternoon)
 
 
-def _write(rows, learned, tuned, train_scores):
+def _write(rows, learned, tuned, train_scores, afternoon=None):
     from baselines.dsp import _clock
 
     def mean(days, key):
@@ -194,7 +244,29 @@ def _write(rows, learned, tuned, train_scores):
                   "with the DSP vans, still behind Prime Air with vans. The fleet is faster for what it delivers, but "
                   "every parcel left for tomorrow counts 24 hours. A smaller penalty would favour the fleet; a parcel "
                   "a day late is a real cost, though, so 24 hours stays."]
-    lines += ["", "Fixed waits on the training days, for choosing the tuned one:", "",
+    if afternoon:
+        lines += ["", "## With the afternoon second pass", "",
+                  "Each truck then goes out again with what it couldn't deliver (baselines/classical.py). The learned "
+                  "policies were trained without it; the fixed wait and the hand rule are tuned again with it in.", "",
+                  "| waits | score | delivered today | half of all parcels by | by 14:00 | last parcel |",
+                  "|---|---|---|---|---|---|"] + \
+            [f"| {name} | {mean(d, 'score'):.2f} h | {mean(d, 'delivered'):.0%} | {_clock(mean(d, 'half'))} | "
+             f"{mean(d, 'by14'):.0%} | {_clock(mean(d, 'last'))} |" for name, d in afternoon.items()]
+    if afternoon and learned:
+        days = list(afternoon.values())  # fixed 10, tuned fixed, hand rule, learned seeds..., re-tuned fixed, re-tuned rule
+        before, after = list(rows.values())[0], days[0]
+        late = np.mean([mean(d, "score") for d in days[3:-2]])
+        lines += ["", "What it changes:", "",
+                  f"- **The second pass matters more than the waits.** With it, the solver's own 10-minute waits go from "
+                  f"{mean(before, 'score'):.2f} h to {mean(after, 'score'):.2f} h and from {mean(before, 'delivered'):.0%} "
+                  f"to {mean(after, 'delivered'):.0%} delivered today, a bigger gain than the learned waits made.",
+                  "- **It undoes what the learned waits learned.** Waiting long for a late recipient pays when a miss costs "
+                  f"{rt.MISSED:.0f} hours; with a second pass a miss costs a few hours, so shorter waits win. The learned "
+                  f"policies, trained without it, score {late:.2f} h, no better than the plain 10-minute wait. The hand "
+                  f"rule tuned with the second pass in waits less and scores {mean(days[-1], 'score'):.2f} h, the best here.",
+                  "- **So the waits have to be learned with the second pass in.** That's the next step: a learned policy "
+                  "that can't at least match the re-tuned rule isn't worth keeping."]
+    lines +=["", "Fixed waits on the training days, for choosing the tuned one:", "",
               "| wait | " + " | ".join(f"{w * 60:.0f} min" for w in WAITS) + " |",
               "|---|" + "---|" * len(WAITS),
               "| score | " + " | ".join(f"{s:.2f} h" for s in train_scores) + " |"]

@@ -25,6 +25,7 @@ START, END = dsp.SHIFT_START + dsp.LOADOUT, dsp.SHIFT_START + dsp.SHIFT
 
 @dataclass
 class Stop:
+    parcels: np.ndarray  # the day's parcel indices here: locker ones first, then drone ones
     locker_ready: np.ndarray  # hours from being told to turning up, per locker parcel collected here
     locker_walk: np.ndarray  # m each of them walks
     drone_offset: np.ndarray  # hours from the truck arriving to each drone drop (NaN: can't fly at all)
@@ -46,6 +47,8 @@ class Plan:
     routes: list
     parcels: int  # all the day's parcels
     fixed: np.ndarray  # delivery hours (NaN: missed) of parcels on no route, e.g. no pickup point in reach
+    fixed_parcels: np.ndarray = None  # their indices
+    day_id: tuple = None  # (city seed, day number), to rebuild the day for the second pass
 
 
 def plan_day(day, seconds=dsp.SOLVER_SECONDS):
@@ -56,8 +59,7 @@ def plan_day(day, seconds=dsp.SOLVER_SECONDS):
 def from_solve(day, r):
     """Boil down one classical.solve result for replaying."""
     plan, drop_time = r["plan"], r["drop_time"]
-    fly = plan["fly"]
-    flown, locker = np.flatnonzero(fly), np.flatnonzero(~fly)
+    flown, locker = np.flatnonzero(plan["fly"]), np.flatnonzero(plan["locker"])
     point, walk = plan["point"], plan["walk"]
     ready = (day.recipient_reply[locker] + walk / trucks_only.WALK_SPEED / 60) / 60
     at = plan["at"]
@@ -66,7 +68,8 @@ def from_solve(day, r):
         mine = plan["drone_stop"] == j
         ok = mine & np.isfinite(plan["cycle"])
         _, busy = classical.share_out(plan["cycle"][ok])
-        stops.append(Stop(locker_ready=ready[point == j], locker_walk=walk[point == j],
+        stops.append(Stop(parcels=np.r_[locker[point == j], flown[mine]],
+                          locker_ready=ready[point == j], locker_walk=walk[point == j],
                           drone_offset=(drop_time[mine] - at[j]) if np.isfinite(at[j]) else
                           np.full(mine.sum(), np.nan),
                           drone_launch=plan["start"][mine] / 3600, busy=busy / 3600))
@@ -77,12 +80,10 @@ def from_solve(day, r):
         legs = {h: m[np.ix_(idx, idx)] for h, m in shift.hourly.items()}
         routes.append(Route([stops[j - 1] for j in route], legs, day.weather["gust"], day.weather["rain_mm_h"]))
     on_route = {j - 1 for route in plan["routes"] for j in route}
-    fixed = []
-    fixed += [np.nan] * int((point < 0).sum())  # nobody would walk to any pickup point
-    for j in set(range(len(plan["nodes"]))) - on_route:  # stops no truck got to
-        s = stops[j]
-        fixed += [np.nan] * (len(s.locker_ready) + len(s.drone_offset))
-    return Plan(routes, len(day.parcel_address), np.array(fixed, float))
+    fixed = [locker[point < 0]]  # nobody would walk to any pickup point
+    fixed += [stops[j].parcels for j in sorted(set(range(len(plan["nodes"]))) - on_route)]  # stops no truck got to
+    fixed = np.concatenate(fixed).astype(int)
+    return Plan(routes, len(day.parcel_address), np.full(len(fixed), np.nan), fixed, (day.seed, day.day))
 
 
 def leg(route, a, b, clock):
@@ -104,9 +105,10 @@ def stop_times(route, k, arrive, wait):
     return np.r_[locker, drones], stay
 
 
-def replay(route, waits):
+def replay(route, waits, back=False):
     """Drive the route with a wait (hours) at each stop. Stops it can't fit and still be back by the end
-    of the shift are skipped, as in dsp.drive. Returns delivery hours of every parcel on it."""
+    of the shift are skipped, as in dsp.drive. Returns delivery hours of every parcel on it, in stop order
+    (and with back=True, also when the truck is back at the station)."""
     clock, at, out = START, 0, []
     for k, wait in enumerate(waits):
         arrive = clock + leg(route, at, k + 1, clock)
@@ -116,7 +118,8 @@ def replay(route, waits):
             continue
         out.append(times)
         clock, at = arrive + stay, k + 1
-    return np.concatenate(out) if out else np.zeros(0)
+    times = np.concatenate(out) if out else np.zeros(0)
+    return (times, clock + leg(route, at, 0, clock)) if back else times
 
 
 def score(times):
@@ -128,6 +131,19 @@ def score(times):
 def day_times(plan, waits_per_route):
     """Delivery hours of all the day's parcels, routes replayed with the given waits."""
     return np.concatenate([plan.fixed] + [replay(r, w) for r, w in zip(plan.routes, waits_per_route)])
+
+
+def with_second_pass(plan, waits_per_route, day):
+    """Delivery hours of every parcel (indexed like the day's), the routes replayed with these waits and then
+    each truck's afternoon second pass (baselines/classical.second_pass)."""
+    t = np.full(plan.parcels, np.nan)
+    trucks = []
+    for route, waits in zip(plan.routes, waits_per_route):
+        times, home = replay(route, waits, back=True)
+        parcels = np.concatenate([s.parcels for s in route.stops]).astype(int)
+        t[parcels] = times
+        trucks.append((home, parcels))
+    return classical.second_pass(day, trucks, t)[0]
 
 
 def summary(times):

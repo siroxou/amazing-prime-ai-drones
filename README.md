@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phases 1 to 3 are done, and Phase 4's first learned piece, locker waits, passes its exit check. The 3D city and random delivery days are in. So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a classical solver for the full truck + drone fleet. The solver's drones now fly on a cost model with wind, payload, battery, flight heights and drop planning. Everything runs on the 50 held-out days in a few minutes. Next in Phase 4: learning the decisions that don't have an obvious rule. Then comes the 3D drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phases 1 to 3 are done, and Phase 4's first learned piece, locker waits, passes its exit check. The 3D city and random delivery days are in. So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a classical solver for the full truck + drone fleet. The solver's drones now fly on a cost model with wind, payload, battery, flight heights and drop planning. Each truck now goes out again in the afternoon with what it couldn't deliver in the morning. Everything runs on the 50 held-out days in a few minutes. Next in Phase 4: learning the locker waits again with the second pass in, then the decisions that don't have an obvious rule. Then comes the 3D drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -90,18 +90,19 @@ The same 50 held-out days for every system, averaged ([results/baselines.md](res
 
 | system | score | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
 |---|---|---|---|---|---|---|---|
-| Amazon DSP vans | 3.01 h | 100% | 15:46 | 13:05 | 67% | 2 vans | 12.5 |
-| Amazon Prime Air (10 drones) plus vans | **2.71 h** | 100% | 16:26 | 12:43 | 73% | 1.1 vans | 7.2 |
-| Locker trucks, no drones (10 min wait) | 5.28 h | 82% | 12:17 | 11:21 | 82% | 3 trucks | 0 |
-| Trucks with 10 drones each, classical solver | 4.13 h | 86% | 12:04 | 11:09 | 86% | 2 trucks | 0 |
-| The same, launching from the moving truck | 3.99 h | 87% | 11:58 | 11:01 | 87% | 2 trucks | 0 |
-| The classical solver with learned locker waits | 3.03 h | 93% | 13:52 | 11:18 | 90% | 2 trucks | 0 |
+| Amazon DSP vans | 3.02 h | 100% | 15:46 | 13:05 | 68% | 2 vans | 12.5 |
+| Amazon Prime Air (10 drones) plus vans | 2.71 h | 100% | 16:26 | 12:43 | 73% | 1.1 vans | 7.2 |
+| Locker trucks, no drones (10 min wait) | 5.29 h | 82% | 12:17 | 11:22 | 82% | 3 trucks | 0 |
+| Trucks with 10 drones each, classical solver, morning only | 4.13 h | 86% | 12:04 | 11:10 | 86% | 2 trucks | 0 |
+| The same with learned locker waits, morning only | 3.03 h | 93% | 13:52 | 11:18 | 90% | 2 trucks | 0 |
+| Classical solver with an afternoon second pass | 2.15 h | 96% | 13:39 | 11:09 | 95% | 2 trucks | 0 |
+| The same, launching from the moving truck | **2.02 h** | 96% | 13:32 | 11:02 | 95% | 2 trucks | 0 |
 
-The score is the average hours from 10:00 until a parcel is delivered, with a parcel not delivered today counting 24 hours; lower is better. It's one number that weighs speed against parcels left behind. The learned-waits row is the average of three trained policies ([results/learned-waits.md](results/learned-waits.md)).
+The score is the average hours from 10:00 until a parcel is delivered, with a parcel not delivered today counting 24 hours; lower is better. It's one number that weighs speed against parcels left behind. The learned-waits row is the average of three trained policies ([results/learned-waits.md](results/learned-waits.md)); it isn't in `baselines.run`.
 
 `python -m baselines.run` reruns this table in a few minutes. Results move from run to run because OR-Tools gets a fixed time per solve: across four runs, the vans' "half of all parcels by" ranged from 12:54 to 13:16.
 
-**Does the fleet beat Amazon?** Not yet. For the parcels it delivers it's much faster: with learned locker waits it gets 90% out by 14:00, against about 65–70% for the vans. But it leaves 7% of parcels for tomorrow, while the vans and Prime Air deliver every one. Counting those, it only ties the vans on the score, and Prime Air with vans is ahead. The parcels it leaves behind are locker parcels whose recipients didn't come out in time; many are parcels the drones couldn't take because of wind. Much of what it depends on is still guessed. [results/baselines.md](results/baselines.md) lists what to trust and what not to, and the sections below explain each system.
+**Does the fleet beat Amazon?** On these numbers, yes, but only because of a guess. With the afternoon second pass, each truck comes back, reloads and takes out again what it couldn't deliver. That gets 96% of parcels out today, almost all by 14:00, and beats both Amazon systems on the score. But it assumes everyone who missed the truck in the morning comes out the second time as readily as anyone would. If nobody did, the fleet would score 3.73 h, behind both. It beats the DSP vans if about half come out the second time, and Prime Air with vans if about two thirds do. Nobody publishes that share. It also still leaves 4% of parcels for tomorrow, where the vans and Prime Air deliver every one. Much else it depends on is guessed too. [results/baselines.md](results/baselines.md) lists what to trust and what not to, and the sections below explain each system.
 
 ## The Amazon baselines
 
@@ -159,7 +160,7 @@ Without drones, the locker trucks are faster than the vans, but only by leaving 
 
 ## This project's fleet: the classical solver
 
-The first version of the fleet is planned with plain heuristics and OR-Tools. Each truck carries 10 drones and a locker. It parks at a series of stops. From each one its drones fly out to the parcels assigned to that stop and come back, and locker recipients nearby walk over. A drone takes any parcel up to 5 kg and large-box size, to a yard, a porch or a top-floor balcony with open sky. Everything else goes in the locker. Locker pickup points come first, drone parcels fly from the nearest one within 600 m, and the rest get launch stops of their own. At each stop the sorties are shared out between the drones, and the trucks are routed through the stops. When the weather or a no-fly zone stops a drone at the time the truck gets there, the parcel moves to the locker and the day is planned again ([results/classical-solver.md](results/classical-solver.md)).
+The first version of the fleet is planned with plain heuristics and OR-Tools. Each truck carries 10 drones and a locker. It parks at a series of stops. From each one its drones fly out to the parcels assigned to that stop and come back, and locker recipients nearby walk over. A drone takes any parcel up to 5 kg and large-box size, to a yard, a porch or a top-floor balcony with open sky. Everything else goes in the locker. Locker pickup points come first, drone parcels fly from the nearest one within 600 m, and the rest get launch stops of their own. At each stop the sorties are shared out between the drones, and the trucks are routed through the stops. When the weather or a no-fly zone stops a drone at the time the truck gets there, the parcel moves to the locker and the day is planned again. Once a truck is back at the station it reloads for 15 minutes and goes out again with what it couldn't deliver: by drone if the wind now allows, otherwise with a second notice and a 20-minute wait at each stop. About 9% of parcels go out on that second pass ([results/classical-solver.md](results/classical-solver.md)).
 
 Each flight is planned with the drone cost model ([docs/drone-model.md](docs/drone-model.md)). Power comes from rotor physics with the parcel's weight and drag. The battery holds less in the cold, and the drone holds 15 m/s through the air, so the wind changes its speed over the ground. Flight heights clear rooftops, trees and wires by 10 m and follow the airspace rules. At the address it drops, lowers or sets the parcel down, depending on fragility, gusts and room. Compared with the Phase 2 fixed-speed model, drones take 36% of parcels instead of 46%, mostly because of wind. The launch radius barely matters (300, 600 and 1,000 m give the same results within a few minutes), because locker pickup points are already close to most drone parcels. With `moving=True`, the trucks stop only for the locker. Drones take off from the truck wherever it is, and fly to meet it where it'll be after the drop, landing on it on the move. It works, but it changes only a few minutes either way: the trucks spend most of their day parked at locker pickup points, and the drones' 2–3 minute flights fit inside those stops ([results/moving-launch.md](results/moving-launch.md)). In this city the locker wait, not the drones, is what holds the trucks up.
 
@@ -175,6 +176,8 @@ The first learned piece decides how long each truck waits at each stop for its l
 | hand rule, tuned on training days | 3.02 h | 92% | 11:15 |
 
 The learned waits beat the classical solver on every seed, which is Phase 4's exit check. But what the policy learned is simple: wait longer where more recipients are coming and later in the route, and not at all where only drones are working. A two-setting hand rule tuned on the same days (half a minute per locker parcel, plus up to 20 minutes the further along the route) does just as well. So learning found the improvement, but isn't needed to use it. The case for learning has to come from decisions without an obvious rule: which parcels go by drone, the routes, and replanning when the day goes off plan.
+
+The afternoon second pass changes this. Waiting long for a late recipient pays when missing them costs a whole day; with a second pass it costs a few hours, so shorter waits win. With the second pass in, the learned waits (trained without it) score 2.23 h, no better than the plain 10-minute wait's 2.15 h. A hand rule tuned again with the second pass in (a quarter of a minute per locker parcel, plus up to 10 minutes along the route) scores 2.00 h. The waits need learning again with the second pass in, and a learned policy has to at least match that rule to be worth keeping.
 
 ## How it works
 
