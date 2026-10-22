@@ -4,14 +4,16 @@ The same 50 held-out days (city seeds 1000–1009, days 0–4, 500 parcels each)
 
 <!-- table: written by python -m baselines.run -->
 
-| system | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
-|---|---|---|---|---|---|---|
-| Amazon DSP vans ([dsp-baseline.md](dsp-baseline.md)) | 100% | 15:47 | 13:16 | 65% | 2.0 vans | 12.6 |
-| Amazon Prime Air, 10 drones at the site, plus vans ([prime-air-baseline.md](prime-air-baseline.md)) | 100% | 16:26 | 12:42 | 73% | 1.1 vans | 7.2 |
-| Locker trucks, no drones, 10 min wait ([trucks-only-baseline.md](trucks-only-baseline.md)) | 82% | 12:17 | 11:23 | 82% | 3.0 trucks | 0.0 |
-| Locker trucks, no drones, 30 min wait ([trucks-only-baseline.md](trucks-only-baseline.md)) | 97% | 16:38 | 13:18 | 58% | 3.0 trucks | 0.0 |
-| Trucks with 10 drones each, classical solver, 600 m launch radius ([classical-solver.md](classical-solver.md)) | 86% | 12:04 | 11:09 | 86% | 2.0 trucks | 0.0 |
-| The same, drones launching from and landing on the moving truck ([moving-launch.md](moving-launch.md)) | 87% | 11:58 | 11:02 | 87% | 2.0 trucks | 0.0 |
+| system | score | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
+|---|---|---|---|---|---|---|---|
+| Amazon DSP vans ([dsp-baseline.md](dsp-baseline.md)) | 3.01 h | 100% | 15:46 | 13:05 | 67% | 2.0 vans | 12.5 |
+| Amazon Prime Air, 10 drones at the site, plus vans ([prime-air-baseline.md](prime-air-baseline.md)) | 2.71 h | 100% | 16:26 | 12:43 | 73% | 1.1 vans | 7.2 |
+| Locker trucks, no drones, 10 min wait ([trucks-only-baseline.md](trucks-only-baseline.md)) | 5.28 h | 82% | 12:17 | 11:21 | 82% | 3.0 trucks | 0.0 |
+| Locker trucks, no drones, 30 min wait ([trucks-only-baseline.md](trucks-only-baseline.md)) | 3.88 h | 97% | 16:38 | 13:19 | 57% | 3.0 trucks | 0.0 |
+| Trucks with 10 drones each, classical solver, 600 m launch radius ([classical-solver.md](classical-solver.md)) | 4.13 h | 86% | 12:04 | 11:09 | 86% | 2.0 trucks | 0.0 |
+| The same, drones launching from and landing on the moving truck ([moving-launch.md](moving-launch.md)) | 3.99 h | 87% | 11:58 | 11:01 | 87% | 2.0 trucks | 0.0 |
+
+Score: average hours from 10:00 until a parcel is delivered, a parcel not delivered today counting 24 hours; lower is better (optimiser/routes.py).
 
 All six over all 50 days took 2.2 minutes on 18 workers (`python -m baselines.run`).
 
@@ -26,6 +28,7 @@ All six over all 50 days took 2.2 minutes on 18 workers (`python -m baselines.ru
 - **Wind is what limits the drones.** With the cost model ([docs/drone-model.md](../docs/drone-model.md)) instead of Phase 2's fixed-speed one, drones take 36% of parcels instead of 46%. On windy days the wind at cruise height outruns the drone's 15 m/s airspeed, or the gusts rule out the drop spot, so those parcels move to the locker.
 - **Most of the speed gain over the vans comes from the locker trucks, not the drones.** Locker trucks alone, with a 10-minute wait, finish about three and a half hours before the vans, because nobody walks every parcel to a door; but they leave 18% of parcels behind. Adding the drones makes the fleet a little earlier still and gets 4 more parcels in every 100 delivered.
 - **Launching from a moving truck changes only a few minutes,** because the trucks spend most of their day parked at locker pickup points and the drones' short flights fit inside those stops.
+- **On one score, Prime Air with vans is best.** Counting a parcel left for tomorrow as 24 hours, Prime Air with vans scores 2.71 h, the DSP vans 3.01 h, and the fleet 4.13 h (3.99 h with moving launches). With learned locker waits ([learned-waits.md](learned-waits.md)) the fleet gets to 3.03 h, level with the vans but still behind Prime Air: it's faster, but it leaves parcels behind.
 - **Prime Air saves Amazon driver hours, not time.** Its drones are limited by what they can take, not by how many there are.
 - **On 6 of the 50 days the fleet's drones are grounded all morning,** and with it done by noon, the morning is all that matters. Prime Air, flying all day, is grounded all day on 4 of the 50.
 

@@ -86,14 +86,19 @@ Caveat: other seeds give 1,700–2,000 addresses, so not every city reaches 2,00
 
 **Result: a split verdict, written up.** On the 50 held-out days the fleet gets 86% of parcels out by 14:00, against about 65–70% for the vans, and finishes around noon instead of mid-afternoon. But it leaves 14% behind, while the vans deliver everything. Wind is the main limit: drones take 36% of parcels, down from 46% with the fixed-speed model ([results/baselines.md](results/baselines.md), [docs/drone-model.md](docs/drone-model.md)).
 
-## Phase 4: Learned optimiser
+## Phase 4: Learned optimiser ← in progress
 
-- [ ] Planning env over the macro sim: the optimiser makes the dispatch, routing and sortie decisions as the day goes, and gets scored on delivery time
-- [ ] Start with learned improvements to the classical solver (for example, learning which parcels go by drone, or where launch points go), then try a full learned planner, such as an attention-based routing model trained with RL
+- [x] Planning env over the macro sim, scored on delivery time, with a parcel left for tomorrow counting 24 hours (`optimiser/routes.py`). So far it covers one decision, how long each truck waits at each stop
+- [ ] The same env for dispatch, routing and sortie decisions
+- [x] First learned improvement to the classical solver: locker waits per stop, trained with PPO (`optimiser/waits.py`, [results/learned-waits.md](results/learned-waits.md)). It beats the classical solver, but a two-setting hand rule matches it
+- [ ] Learned decisions without an obvious rule: which parcels go by drone, where launch points go
+- [ ] A full learned planner, such as an attention-based routing model trained with RL
 - [ ] Re-planning during the day: traffic jams, a drone that comes back late, a wind change
-- [ ] Benchmark against the classical solver and the Amazon DSP baseline on held-out days, three seeds
+- [x] Benchmark against the classical solver and the Amazon baselines on held-out days, three seeds
 
 **Exit:** the learned optimiser beats the classical solver on held-out days, averaged over three seeds. If it doesn't, the classical solver stays as the main result and this is written up.
+
+**Passed, with a caveat.** Learned locker waits score 3.03 h on the held-out days (three seeds, 3.01 to 3.05), against 4.13 h for the classical solver's 10-minute wait and 3.64 h for the best fixed wait. But a two-setting hand rule tuned the same way scores 3.02 h, so learning isn't needed for this decision. Against Amazon on the same score, the fleet now ties the DSP vans (3.01 h) and is behind Prime Air with vans (2.71 h). The rest of this phase is about decisions where a simple rule isn't obvious.
 
 ## Phase 5: Micro sim check
 

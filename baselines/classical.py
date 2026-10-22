@@ -121,6 +121,7 @@ def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS, 
         "by_drone": float((~np.isnan(t[flown])).sum() / n),
         "undelivered": int(np.isnan(t).sum()), "last": float(np.nanmax(t)) if (~np.isnan(t)).any() else np.nan,
         "truck_hours": plan["truck_hours"] + extra, "km": plan["km"], "replanned": int(attempt),
+        "plan": plan, "drop_time": drop_time,  # what the learned optimiser replays (optimiser/routes.py)
     }
 
 
@@ -163,6 +164,7 @@ def _plan(day, fly, target, radius, window, seconds, parked=True):
     leave = stop_at + dwell[np.maximum(point, 0)] / 3600
     collected = np.where(came <= leave, np.maximum(came, stop_at), np.nan)
     return {"fly": fly.copy(), "nodes": nodes, "drone_stop": drone_stop, "cycle": cycle, "start": start,
+            "point": point, "walk": walk,
             "at": at, "collected": collected, "trucks": len(routes), "routes": routes, "shift": shift,
             "service": service, "back": back,
             "truck_hours": float(sum(b - dsp.SHIFT_START for b in back)), "km": metres / 1000}

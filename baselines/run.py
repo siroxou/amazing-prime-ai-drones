@@ -24,6 +24,7 @@ from baselines import classical, dsp, prime_air, trucks_only  # noqa: E402
 from baselines.dsp import _clock  # noqa: E402
 from sim.city import City  # noqa: E402
 from sim.day import HELD_OUT, Day  # noqa: E402
+from optimiser.routes import score  # noqa: E402
 
 SYSTEMS = (
     ("Amazon DSP vans", "dsp-baseline.md", lambda day: dsp.baseline(day), "vans"),
@@ -49,7 +50,7 @@ def one_day(seed_day):
     for _, _, run, vehicle in SYSTEMS:
         r = run(day)
         t = r["parcel_time"]
-        out.append({"delivered": np.mean(~np.isnan(t)), "last": np.nanmax(t), "half": trucks_only.half(t),
+        out.append({"score": score(t), "delivered": np.mean(~np.isnan(t)), "last": np.nanmax(t), "half": trucks_only.half(t),
                     "by14": np.mean(t <= 14), "vehicles": r["vans"] if vehicle == "vans" else r["trucks"],
                     "driver_hours": r.get("driver_hours", 0.0)})
     return out
@@ -72,16 +73,18 @@ def table(days, workers, minutes):
     lines = [
         START,
         "",
-        "| system | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |",
-        "|---|---|---|---|---|---|---|",
+        "| system | score | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for k, (name, link, _, vehicle) in enumerate(SYSTEMS):
         rs = [day[k] for day in days]
         mean = {key: np.mean([r[key] for r in rs]) for key in rs[0]}
-        lines.append(f"| {name} ([{link}]({link})) | {mean['delivered']:.0%} | {_clock(mean['last'])} | "
+        lines.append(f"| {name} ([{link}]({link})) | {mean['score']:.2f} h | {mean['delivered']:.0%} | {_clock(mean['last'])} | "
                      f"{_clock(mean['half'])} | {mean['by14']:.0%} | {mean['vehicles']:.1f} {vehicle} | "
                      f"{mean['driver_hours']:.1f} |")
-    lines += ["", f"All six over all {len(days)} days took {minutes:.1f} minutes on {workers} workers "
+    lines += ["", "Score: average hours from 10:00 until a parcel is delivered, a parcel not delivered today "
+              "counting 24 hours; lower is better (optimiser/routes.py).", "",
+              f"All six over all {len(days)} days took {minutes:.1f} minutes on {workers} workers "
               "(`python -m baselines.run`).", "", END]
     return "\n".join(lines)
 

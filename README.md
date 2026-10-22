@@ -10,7 +10,7 @@ This is an independent project and isn't affiliated with or endorsed by Amazon.
 
 This started as a fork of [self-driving-optimized](https://github.com/siroxou/self-driving-optimized), a self-driving car sensor study. The road generator, vehicle model and traffic from that project now drive the trucks; everything car-specific was taken out.
 
-**Status:** Phases 1 to 3 are done. The 3D city and random delivery days are in. So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a classical solver for the full truck + drone fleet. The solver's drones now fly on a cost model with wind, payload, battery, flight heights and drop planning. Everything runs on the 50 held-out days in a few minutes. Next is Phase 4, a learned optimiser that has to beat the classical solver, and then the 3D drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
+**Status:** Phases 1 to 3 are done, and Phase 4's first learned piece, locker waits, passes its exit check. The 3D city and random delivery days are in. So are both Amazon baselines (DSP vans, calibrated against Amazon's figures, and Prime Air drones from a fixed site), a trucks-only version of this project's system, and a classical solver for the full truck + drone fleet. The solver's drones now fly on a cost model with wind, payload, battery, flight heights and drop planning. Everything runs on the 50 held-out days in a few minutes. Next in Phase 4: learning the decisions that don't have an obvious rule. Then comes the 3D drone sim, in the phases in [ROADMAP.md](ROADMAP.md).
 
 ## The city
 
@@ -88,17 +88,20 @@ Most of these settings are reasoned guesses, because there's little public data 
 
 The same 50 held-out days for every system, averaged ([results/baselines.md](results/baselines.md)):
 
-| system | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
-|---|---|---|---|---|---|---|
-| Amazon DSP vans | 100% | 15:47 | 13:16 | 65% | 2 vans | 12.6 |
-| Amazon Prime Air (10 drones) plus vans | 100% | 16:26 | 12:42 | 73% | 1.1 vans | 7.2 |
-| Locker trucks, no drones (10 min wait) | 82% | 12:17 | 11:23 | 82% | 3 trucks | 0 |
-| **Trucks with 10 drones each, classical solver** | 86% | 12:04 | 11:09 | 86% | 2 trucks | 0 |
-| **The same, launching from the moving truck** | 87% | 11:58 | 11:02 | 87% | 2 trucks | 0 |
+| system | score | delivered today | last parcel | half of all parcels by | by 14:00 | vehicles | driver hours |
+|---|---|---|---|---|---|---|---|
+| Amazon DSP vans | 3.01 h | 100% | 15:46 | 13:05 | 67% | 2 vans | 12.5 |
+| Amazon Prime Air (10 drones) plus vans | **2.71 h** | 100% | 16:26 | 12:43 | 73% | 1.1 vans | 7.2 |
+| Locker trucks, no drones (10 min wait) | 5.28 h | 82% | 12:17 | 11:21 | 82% | 3 trucks | 0 |
+| Trucks with 10 drones each, classical solver | 4.13 h | 86% | 12:04 | 11:09 | 86% | 2 trucks | 0 |
+| The same, launching from the moving truck | 3.99 h | 87% | 11:58 | 11:01 | 87% | 2 trucks | 0 |
+| The classical solver with learned locker waits | 3.03 h | 93% | 13:52 | 11:18 | 90% | 2 trucks | 0 |
+
+The score is the average hours from 10:00 until a parcel is delivered, with a parcel not delivered today counting 24 hours; lower is better. It's one number that weighs speed against parcels left behind. The learned-waits row is the average of three trained policies ([results/learned-waits.md](results/learned-waits.md)).
 
 `python -m baselines.run` reruns this table in a few minutes. Results move from run to run because OR-Tools gets a fixed time per solve: across four runs, the vans' "half of all parcels by" ranged from 12:54 to 13:16.
 
-**Does the fleet beat Amazon?** For the parcels it delivers, yes, and by a lot. It gets 86% of parcels out by 14:00 against about 65–70% for the vans, and finishes by about noon instead of mid-afternoon. But it leaves 14% of parcels behind, while the vans deliver every one. Those are locker parcels whose recipients didn't come out in time, and many are parcels the drones couldn't take because of wind. So it doesn't beat the vans outright, and how you weigh speed against parcels left behind decides the comparison. Much of what it depends on is still guessed. [results/baselines.md](results/baselines.md) lists what to trust and what not to, and the sections below explain each system.
+**Does the fleet beat Amazon?** Not yet. For the parcels it delivers it's much faster: with learned locker waits it gets 90% out by 14:00, against about 65–70% for the vans. But it leaves 7% of parcels for tomorrow, while the vans and Prime Air deliver every one. Counting those, it only ties the vans on the score, and Prime Air with vans is ahead. The parcels it leaves behind are locker parcels whose recipients didn't come out in time; many are parcels the drones couldn't take because of wind. Much of what it depends on is still guessed. [results/baselines.md](results/baselines.md) lists what to trust and what not to, and the sections below explain each system.
 
 ## The Amazon baselines
 
@@ -159,6 +162,19 @@ Without drones, the locker trucks are faster than the vans, but only by leaving 
 The first version of the fleet is planned with plain heuristics and OR-Tools. Each truck carries 10 drones and a locker. It parks at a series of stops. From each one its drones fly out to the parcels assigned to that stop and come back, and locker recipients nearby walk over. A drone takes any parcel up to 5 kg and large-box size, to a yard, a porch or a top-floor balcony with open sky. Everything else goes in the locker. Locker pickup points come first, drone parcels fly from the nearest one within 600 m, and the rest get launch stops of their own. At each stop the sorties are shared out between the drones, and the trucks are routed through the stops. When the weather or a no-fly zone stops a drone at the time the truck gets there, the parcel moves to the locker and the day is planned again ([results/classical-solver.md](results/classical-solver.md)).
 
 Each flight is planned with the drone cost model ([docs/drone-model.md](docs/drone-model.md)). Power comes from rotor physics with the parcel's weight and drag. The battery holds less in the cold, and the drone holds 15 m/s through the air, so the wind changes its speed over the ground. Flight heights clear rooftops, trees and wires by 10 m and follow the airspace rules. At the address it drops, lowers or sets the parcel down, depending on fragility, gusts and room. Compared with the Phase 2 fixed-speed model, drones take 36% of parcels instead of 46%, mostly because of wind. The launch radius barely matters (300, 600 and 1,000 m give the same results within a few minutes), because locker pickup points are already close to most drone parcels. With `moving=True`, the trucks stop only for the locker. Drones take off from the truck wherever it is, and fly to meet it where it'll be after the drop, landing on it on the move. It works, but it changes only a few minutes either way: the trucks spend most of their day parked at locker pickup points, and the drones' 2–3 minute flights fit inside those stops ([results/moving-launch.md](results/moving-launch.md)). In this city the locker wait, not the drones, is what holds the trucks up.
+
+## The learned optimiser: locker waits
+
+The first learned piece decides how long each truck waits at each stop for its locker. It's the decision that matters most, because the fixed 10-minute wait is why the fleet leaves parcels behind. A policy trained with PPO on 100 days from training cities looks, at each stop, at what a real truck would know there: the time, the shift left, the stops and parcels still to come, how many locker recipients are here and how far they'd walk, and how long its drones need. It doesn't see when any one recipient will turn up ([optimiser/waits.py](optimiser/waits.py), [results/learned-waits.md](results/learned-waits.md)):
+
+| waits at each stop | score | delivered today | half of all parcels by |
+|---|---|---|---|
+| fixed 10 min (classical solver) | 4.13 h | 86% | 11:09 |
+| best fixed wait, tuned on training days (20 min) | 3.64 h | 92% | 12:05 |
+| learned, three seeds | 3.01–3.05 h | 93% | 11:17–11:20 |
+| hand rule, tuned on training days | 3.02 h | 92% | 11:15 |
+
+The learned waits beat the classical solver on every seed, which is Phase 4's exit check. But what the policy learned is simple: wait longer where more recipients are coming and later in the route, and not at all where only drones are working. A two-setting hand rule tuned on the same days (half a minute per locker parcel, plus up to 20 minutes the further along the route) does just as well. So learning found the improvement, but isn't needed to use it. The case for learning has to come from decisions without an obvious rule: which parcels go by drone, the routes, and replanning when the day goes off plan.
 
 ## How it works
 
@@ -227,8 +243,11 @@ python -m baselines.calibrate        # check the DSP van model against Amazon's 
 python -m baselines.dsp --held-out   # DSP vans on the 50 held-out days (about 5 min)
 python -m baselines.prime_air --held-out   # Prime Air at 5, 10 and 20 drones (about 15 min)
 python -m baselines.trucks_only --held-out # trucks with lockers, no drones (about 15 min)
-python -m baselines.classical --held-out   # the truck + drone fleet, classical solver (about 30 min)
-python -m baselines.moving --held-out      # parked against moving launches (about 25 min)
+python -m baselines.classical --held-out   # the truck + drone fleet, classical solver (about 2 min)
+python -m baselines.moving --held-out      # parked against moving launches (about a minute)
+python -m optimiser.waits build            # plan 100 training and the 50 held-out days for the optimiser (about 2 min)
+python -m optimiser.waits train --seed 0   # train a locker-wait policy (about a minute; needs requirements-train.txt)
+python -m optimiser.waits evaluate         # held-out results for fixed waits, the hand rule and the policies
 python -m sim.render     # redraw the pictures in docs/images
 ```
 
@@ -248,6 +267,8 @@ baselines/trucks_only.py  this project's trucks and lockers without the drones
 baselines/classical.py  this project's truck + drone fleet, planned with heuristics and OR-Tools
 baselines/moving.py  drones launching from and landing on the moving truck
 baselines/run.py     runs every baseline on the held-out days in parallel
+optimiser/routes.py  replays a planned day with different waits; the score
+optimiser/waits.py   learned locker waits: environment, PPO training, evaluation
 results/             calibration and benchmark results
 sim/render.py        matplotlib pictures of the city
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
