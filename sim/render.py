@@ -1,6 +1,6 @@
 """Pictures of the city for the README, drawn with matplotlib.
 
-    python -m sim.render                 # writes docs/images/city-*.png
+    python -m sim.render                 # writes docs/images/city-*.png and planned-day.png
     python -m sim.render --seed 3 --day 2 --out /tmp
 """
 import argparse
@@ -17,7 +17,10 @@ from matplotlib.patches import Circle, Polygon, Rectangle  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection  # noqa: E402
 
 from .airspace import UNLIMITED  # noqa: E402
+from . import drone  # noqa: E402
 from .city import City  # noqa: E402
+from .day import Day  # noqa: E402
+from .roads import Paths  # noqa: E402
 
 COLOURS = {"house": "#d8b48e", "apartment": "#a3aebd", "station": "#7f8b99", "balcony": "#6c7480",
            "railing": "#4b5058", "fence": "#9a7752", "trunk": "#6b4f3a", "canopy": "#5f9f5b", "pole": "#5a5a5a",
@@ -122,8 +125,9 @@ def _prism_faces(x, y, r, z0, z1, sides=8):
     return faces + [list(zip(px[:-1], py[:-1], [z1] * sides))]
 
 
-def view_3d(city, path, bounds, kinds=None, elev=30, azim=-60, size=(12, 8), mesh=2.5):
-    """3D view of everything inside bounds (x0, y0, x1, y1), on the hills. `kinds` limits what's drawn."""
+def view_3d(city, path, bounds, kinds=None, elev=30, azim=-60, size=(12, 8), mesh=2.5, draw=None):
+    """3D view of everything inside bounds (x0, y0, x1, y1), on the hills. `kinds` limits what's drawn,
+    and `draw(ax)` adds anything else before it's saved."""
     obs = city.obstacles
     x0, y0, x1, y1 = bounds
     centre = (obs.bounds_lo + obs.bounds_hi) / 2
@@ -172,8 +176,77 @@ def view_3d(city, path, bounds, kinds=None, elev=30, azim=-60, size=(12, 8), mes
     ax.set_box_aspect((x1 - x0, y1 - y0, top - bottom))
     ax.view_init(elev=elev, azim=azim)
     ax.set_axis_off()
+    if draw:
+        draw(ax)
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
+
+
+def planned_day(day, path):
+    """One day planned by the classical solver, over the 3D city: each truck's route along the roads in
+    its own colour, its stops, and every drone sortie from its stop up to cruise height and down to the
+    drop spot. The afternoon second pass is dashed."""
+    from baselines import classical
+
+    city = day.city
+    r = classical.solve(day)
+    passes = [(r["plan"], r["spot"], range(r["trucks"]), "-")] + [
+        (p, p["spot"], [p["truck"]] * p["trucks"], "--") for p in r["second_plans"]]
+    colours = plt.cm.tab10.colors
+    ground = city.terrain.height
+
+    def draw(ax):
+        top = ax.get_zlim()[1]
+        for plan, spot, trucks, style in passes:
+            nodes = plan["shift"].nodes  # the station, then the stops
+            paths = Paths(city, city.edge_length, nodes)
+            truck_of = {}
+            for route, k in zip(plan["routes"], trucks):
+                c = colours[k % 10]
+                legs = [0, *route, 0]
+                xy = city.nodes[np.concatenate([paths.between(nodes[a], nodes[b])[:-1] for a, b in zip(legs, legs[1:])]
+                                               + [[nodes[0]]])]
+                ax.plot(*xy.T, ground(*xy.T) + 3, color=c, linewidth=2.2, linestyle=style, zorder=5)
+                at = city.nodes[nodes[route]]
+                ax.scatter(*at.T, ground(*at.T) + 3, s=22, color="white" if style == "--" else c, edgecolors=c,
+                           linewidths=1.2, depthshade=False, zorder=6)
+                truck_of.update({j - 1: c for j in route})
+            sorties, sortie_colours = [], []
+            for k, i in enumerate(np.flatnonzero(plan["fly"])):
+                stop = plan["drone_stop"][k]
+                if not np.isfinite(plan["cycle"][k]) or stop not in truck_of:
+                    continue
+                a, b = city.nodes[plan["nodes"][stop]], city.spot_pos[spot[i]]
+                hour = plan["at"][stop] if np.isfinite(plan["at"][stop]) else classical.PLAN_HOUR
+                shape = drone.profile(city, a, b[:2], hour)
+                if shape is None:
+                    continue
+                pts, z = shape
+                sorties.append(np.vstack([[*a, ground(*a) + drone.ROOF], np.column_stack([pts, z]), b]))
+                sortie_colours.append(truck_of[stop])
+                top = max(top, z.max())
+            if sorties:
+                ax.add_collection3d(Line3DCollection(sorties, colors=sortie_colours,
+                                                     linewidths=0.5 if style == "-" else 0.8,
+                                                     linestyles=style, alpha=0.75, zorder=7))
+        bottom = ax.get_zlim()[0]
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        ax.set_zlim(bottom, top)
+        ax.set_box_aspect((x1 - x0, y1 - y0, 2 * (top - bottom)))  # heights doubled so the sorties show
+        handles = [plt.Line2D([], [], color="#444444", linewidth=2.2, label="truck route, morning"),
+                   plt.Line2D([], [], color="#444444", linewidth=2.2, linestyle="--", label="afternoon second pass"),
+                   plt.Line2D([], [], color="#444444", marker="o", linestyle="",
+                              label="truck stop (hollow on the second pass)"),
+                   plt.Line2D([], [], color="#444444", linewidth=0.8, label="drone sortie, out to the drop")]
+        ax.legend(handles=handles, loc="upper left", fontsize=9, frameon=False)
+        ax.set_title(f"City {city.seed}, day {city.day}: {r['trucks']} trucks, {r['stops']} stops, "
+                     f"{r['by_drone']:.0%} of {len(r['parcel_time'])} parcels by drone, "
+                     f"{r['second_pass']} on the second pass", fontsize=11)
+
+    view_3d(city, path, (-340, -20, city.width + 20, city.height + 20),
+            kinds=["house", "apartment", "station", "school", "hospital", "stadium"], elev=45, azim=-70,
+            size=(14, 9), mesh=10.0, draw=draw)
 
 
 def main():
@@ -199,8 +272,9 @@ def main():
                               np.array([s["points"][-1] for s in city.streets if s["kind"] == "culdesac"]).reshape(-1, 2)])
     zone = np.bincount(city._zone_at(hazards), minlength=len(city.zone_bounds)).argmax()
     view_3d(city, out / "city-suburb.png", city.zone_bounds[zone], elev=38)
+    planned_day(Day(city), out / "planned-day.png")
     print("wrote", ", ".join(str(out / f) for f in ("city-map.png", "city-overview.png", "city-centre.png",
-                                                     "city-suburb.png")))
+                                                     "city-suburb.png", "planned-day.png")))
 
 
 if __name__ == "__main__":

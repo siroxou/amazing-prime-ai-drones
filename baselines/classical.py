@@ -126,7 +126,7 @@ def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS, 
     t[np.flatnonzero(plan["locker"])] = plan["collected"]
     morning = t.copy()
     by_drone = int((~np.isnan(t[flown])).sum())
-    later = {"hours": 0.0, "by_drone": 0, "km": 0.0}
+    later = {"hours": 0.0, "by_drone": 0, "km": 0.0, "plans": []}
     if second:
         t, later = second_pass(day, trucks_of(plan), t, radius)
     return {
@@ -137,6 +137,7 @@ def solve(day, radius=LAUNCH_RADIUS, window=WINDOW, seconds=dsp.SOLVER_SECONDS, 
         "truck_hours": plan["truck_hours"] + extra + later["hours"], "km": plan["km"] + later["km"],
         "replanned": int(attempt),
         "plan": plan, "drop_time": drop_time,  # what the learned optimiser replays (optimiser/routes.py)
+        "spot": spot, "second_plans": later["plans"],  # for the picture of the day (sim/render.py)
     }
 
 
@@ -152,13 +153,14 @@ def trucks_of(plan):
 
 def second_pass(day, trucks, t, radius=LAUNCH_RADIUS, seconds=SECOND_SECONDS):
     """Each truck goes out again with the parcels it carried but couldn't deliver (NaN in t). Returns the
-    times with the second pass filled in, and {"hours", "by_drone", "km"} it added."""
+    times with the second pass filled in, and {"hours", "by_drone", "km"} it added, with each truck's
+    second-pass plan under "plans" (its drop spots in "spot", its truck in "truck")."""
     t = t.copy()
-    added = {"hours": 0.0, "by_drone": 0, "km": 0.0}
+    added = {"hours": 0.0, "by_drone": 0, "km": 0.0, "plans": []}
     city = day.city
     reply = day.second_reply()
     end = dsp.SHIFT_START + dsp.SHIFT
-    for back, parcels in trucks:
+    for truck, (back, parcels) in enumerate(trucks):
         missed = parcels[np.isnan(t[parcels])]
         begin = back + RELOAD
         if len(missed) == 0 or begin > end - 0.5:
@@ -179,6 +181,7 @@ def second_pass(day, trucks, t, radius=LAUNCH_RADIUS, seconds=SECOND_SECONDS):
         added["hours"] += sum(b - back for b in p["back"])
         added["by_drone"] += int((~np.isnan(drop)).sum())
         added["km"] += p["km"]
+        added["plans"].append({**p, "spot": spot, "truck": truck})
     return t, added
 
 
