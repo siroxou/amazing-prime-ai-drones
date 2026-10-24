@@ -2,6 +2,10 @@
 
 Can a fleet of autonomous trucks, each launching 10 delivery drones, deliver a city's parcels faster than Amazon does today?
 
+![A simulated city from above at low sun, with two driverless trucks' routes in orange and purple and every drone flight of the morning fanning out from the trucks' stops at cruise height](docs/images/3d-hero.jpg)
+
+One planned day on a held-out city: each truck's route, and every morning drone flight from its stops, drawn at the height the planner chose for it. Trucks and drones are drawn larger than life so they show at this distance. Rendered from the simulation with `python -m render3d`.
+
 Flying one drone to one point is solved. This project is about the operation around it: every day brings a random set of parcels across the city, and an optimiser has to decide which truck covers which zone, the route each truck drives, where it launches and recovers its drones, which drone takes which parcel, where and from what height each parcel is put down, and the 3D path each drone flies around power lines, trees and buildings. All of that changes with the weather and with each parcel's size, weight and fragility.
 
 It's scored against a model of Amazon's current last mile: parcels arriving at a delivery station, Delivery Service Partner drivers in vans, and Prime Air drones flying from fixed sites. Both systems start from the same delivery station, with the same days, parcels and city. The Amazon model is built only from public figures and is deliberately generous: good routes for free and the fast end of every range. How it's built, and where each number comes from, is in [docs/amazon-baseline.md](docs/amazon-baseline.md).
@@ -40,11 +44,9 @@ Each seed gives a different city, about 1.5 x 1.2 km:
 
 Airspace heights are above the ground under the drone. `city.airspace.blocked(points, hour)` says which zone, if any, each point is in.
 
-| Edge of the centre | A suburban zone with a crane, pylons and power lines |
+| The centre | The suburbs |
 |---|---|
-| ![3D view of apartment blocks with balconies next to small lots with trees and fences, on a slope](docs/images/city-centre.png) | ![3D view of suburban houses on curving streets with a tower crane, high-voltage pylons and power lines](docs/images/city-suburb.png) |
-
-![3D overview of the whole city on its hills, with the distribution centre on the left, the stadium, schools, hospital, cranes and the high-voltage line](docs/images/city-overview.png)
+| ![Apartment blocks with rows of balconies next to small lots with pitched-roof houses, trees and fences](docs/images/3d-centre.jpg) | ![Suburban houses on curving streets with a cul-de-sac, a tower crane, high-voltage pylons, power lines and a guyed cell tower](docs/images/3d-hazards.jpg) |
 
 The default city (seed 0) has 2,038 addresses, 4,252 drop spots and about 12,000 obstacles, and builds in about 0.7 s. Other seeds give 1,700 to 2,000 addresses. Drones see the city through raycasts: about 1,900 casts of 64 rays a second on a laptop, against buildings, trees, wires and the hills.
 
@@ -104,6 +106,10 @@ The score is the average hours from 10:00 until a parcel is delivered, with a pa
 
 **Does the fleet beat Amazon?** On these numbers, yes, but only because of a guess. With the afternoon second pass, each truck comes back, reloads and takes out again what it couldn't deliver. That gets 96% of parcels out today, almost all by 14:00, and beats both Amazon systems on the score. But it assumes everyone who missed the truck in the morning comes out the second time as readily as anyone would. If nobody did, the fleet would score 3.73 h, behind both. It beats the DSP vans if about half come out the second time, and Prime Air with vans if about two thirds do. Nobody publishes that share. It also still leaves 4% of parcels for tomorrow, where the vans and Prime Air deliver every one. Much else it depends on is guessed too. [results/baselines.md](results/baselines.md) lists what to trust and what not to, and the sections below explain each system.
 
+![A rainy, grey held-out day: a truck parked by apartment blocks with people walking over to its locker, no drones in the air](docs/images/3d-grounded.jpg)
+
+Bad weather is where the fleet is weakest. On this held-out day it's too wet to fly at all, every parcel goes in the lockers, and 10% are left for tomorrow.
+
 ## The Amazon baselines
 
 ### DSP vans
@@ -162,11 +168,11 @@ Without drones, the locker trucks are faster than the vans, but only by leaving 
 
 The first version of the fleet is planned with plain heuristics and OR-Tools. Each truck carries 10 drones and a locker. It parks at a series of stops. From each one its drones fly out to the parcels assigned to that stop and come back, and locker recipients nearby walk over. A drone takes any parcel up to 5 kg and large-box size, to a yard, a porch or a top-floor balcony with open sky. Everything else goes in the locker. Locker pickup points come first, drone parcels fly from the nearest one within 600 m, and the rest get launch stops of their own. At each stop the sorties are shared out between the drones, and the trucks are routed through the stops. When the weather or a no-fly zone stops a drone at the time the truck gets there, the parcel moves to the locker and the day is planned again. Once a truck is back at the station it reloads for 15 minutes and goes out again with what it couldn't deliver: by drone if the wind now allows, otherwise with a second notice and a 20-minute wait at each stop. About 9% of parcels go out on that second pass ([results/classical-solver.md](results/classical-solver.md)).
 
-![3D view of the city with two truck routes in orange and blue, their stops, and thin lines for each drone flight from a stop up to cruise height and down to the drop, the afternoon second pass dashed](docs/images/planned-day.png)
+| At a stop | At the drop |
+|---|---|
+| ![A parked truck on a street of houses, ten drones flying out from it over the rooftops on their planned paths, and people walking over to its locker](docs/images/3d-stop.jpg) | ![A drone hovering above an apartment roof, lowering a parcel on a line onto a top-floor balcony](docs/images/3d-drop.jpg) |
 
-One day as the classical solver plans it (city 0, day 0): each truck's route and stops in its own colour, a line for every drone flight, and the afternoon second pass dashed.
-
-Each flight is planned with the drone cost model ([docs/drone-model.md](docs/drone-model.md)). Power comes from rotor physics with the parcel's weight and drag. The battery holds less in the cold, and the drone holds 15 m/s through the air, so the wind changes its speed over the ground. Flight heights clear rooftops, trees and wires by 10 m and follow the airspace rules. At the address it drops, lowers or sets the parcel down, depending on fragility, gusts and room. Compared with the Phase 2 fixed-speed model, drones take 36% of parcels instead of 46%, mostly because of wind. The launch radius barely matters (300, 600 and 1,000 m give the same results within a few minutes), because locker pickup points are already close to most drone parcels. With `moving=True`, the trucks stop only for the locker. Drones take off from the truck wherever it is, and fly to meet it where it'll be after the drop, landing on it on the move. It works, but it changes only a few minutes either way: the trucks spend most of their day parked at locker pickup points, and the drones' 2–3 minute flights fit inside those stops ([results/moving-launch.md](results/moving-launch.md)). In this city the locker wait, not the drones, is what holds the trucks up.
+Left: a truck parked at one of its stops, its drones on the way out and people walking over to collect from its locker. Right: a parcel lowered on a line, the only way onto a balcony; covered balconies below the top floor can't be reached from above. Drones, trucks and people are drawn larger than life so they show at these distances.
 
 ## The learned optimiser: locker waits
 
@@ -255,7 +261,8 @@ python -m baselines.moving --held-out      # parked against moving launches (abo
 python -m optimiser.waits build            # plan 100 training and the 50 held-out days for the optimiser (about 2 min)
 python -m optimiser.waits train --seed 0   # train a locker-wait policy (about a minute; needs requirements-train.txt)
 python -m optimiser.waits evaluate         # held-out results for fixed waits, the hand rule and the policies
-python -m sim.render     # redraw the pictures in docs/images
+python -m sim.render     # redraw the city map in docs/images
+python -m render3d       # redraw the 3D pictures in docs/images (needs Chrome or Chromium, about 2 min)
 ```
 
 ## Layout
@@ -277,7 +284,8 @@ baselines/run.py     runs every baseline on the held-out days in parallel
 optimiser/routes.py  replays a planned day with different waits; the score
 optimiser/waits.py   learned locker waits: environment, PPO training, evaluation
 results/             calibration and benchmark results
-sim/render.py        matplotlib pictures of the city
+sim/render.py        the top-down city map, drawn with matplotlib
+render3d/            the 3D pictures: a planned day as data (scene.py), drawn with three.js in headless Chrome
 sim/world.py         single procedural roads and a 2D raycaster, from the car project
 sim/vehicle.py       kinematic bicycle model and collision shape, used by the truck and traffic
 sim/traffic.py       IDM traffic and parked cars around the truck

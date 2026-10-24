@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planned day</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { --card: rgba(16, 22, 30, 0.72); --ink: #f3f6f9; --muted: #b7c2cd; --line: rgba(255,255,255,0.14);
+    --display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; --body: "IBM Plex Sans", system-ui, sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8d0; }
+  [hidden] { display: none !important; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw !important; height: 100vh !important; }
+  .card { position: absolute; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 18px; backdrop-filter: blur(10px); font: 14px/1.45 var(--body); }
+  #caption { left: 24px; bottom: 24px; max-width: 560px; display: grid; gap: 6px; }
+  #caption .eyebrow { font: 600 11px/1.2 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  #caption .title { font: 600 26px/1.15 var(--display); letter-spacing: -0.005em; }
+  #caption .line { color: var(--muted); }
+  #caption .stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  #caption .stats span { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+  #legend { right: 24px; bottom: 24px; display: grid; gap: 5px; font-size: 13px; }
+  #legend div { display: flex; align-items: center; gap: 9px; }
+  #legend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; }
+  #legend i.dot { width: 10px; height: 10px; border-radius: 50%; margin: 0 4px; }
+</style>
+</head>
+<body>
+<div id="caption" class="card" hidden></div>
+<div id="legend" class="card" hidden></div>
+<!-- shot data -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script>
+(() => {
+const D = window.DAY, SHOT = window.SHOT || { kind: "hero" };
+const TRUCK = ["#ff6a00", "#8b5cf6", "#10b981", "#ec4899"];
+const v = (x, y, z) => new THREE.Vector3(x, z, -y);  // sim x, y on the ground and z up -> three's y up
+const clock = h => `${String(Math.floor(h)).padStart(2, "0")}:${String(Math.floor((h % 1) * 60 + 1e-6)).padStart(2, "0")}`;
+THREE.ColorManagement.legacyMode = false;
+
+// ---------- deterministic noise, so every render of a shot is identical ----------
+let seed = 12345;
+const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+const noise = (x, y) => Math.sin(x * 0.013 + Math.sin(y * 0.011) * 2) * 0.5 + Math.sin(y * 0.017 + x * 0.006) * 0.35 + Math.sin((x + y) * 0.051) * 0.15;
+
+// ---------- renderer, sky, light ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = SHOT.exposure || 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const rainy = SHOT.rainy;
+const horizon = new THREE.Color(rainy ? "#c3c8cd" : "#efe6d8"), zenith = new THREE.Color(rainy ? "#7d8893" : "#5a8fd0");
+scene.fog = new THREE.FogExp2(horizon, SHOT.fog || 0.00028);
+{
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: zenith }, bottom: { value: horizon } },
+    vertexShader: "varying float h; void main() { h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: "uniform vec3 top; uniform vec3 bottom; varying float h; void main() { gl_FragColor = vec4(mix(bottom, top, pow(clamp(h * 3.5, 0.0, 1.0), 0.55)), 1.0);\n#include <tonemapping_fragment>\n#include <encodings_fragment>\n}",
+  }));
+  scene.add(sky);
+}
+scene.add(new THREE.HemisphereLight(rainy ? "#c8d0d8" : "#d4e3f5", "#6e6656", rainy ? 1.2 : 0.95));
+const sun = new THREE.DirectionalLight(rainy ? "#e8ecf0" : "#ffd2a0", rainy ? 0.8 : 2.9);
+sun.castShadow = true;
+sun.shadow.mapSize.set(8192, 8192);
+sun.shadow.bias = -0.00025;
+sun.shadow.normalBias = 0.4;
+scene.add(sun, sun.target);
+
+// ---------- helpers ----------
+const G = D.city.grid;
+function heightAt(x, y) {
+  const fx = Math.min(Math.max((x - G.x0) / G.step, 0), G.nx - 1.001), fy = Math.min(Math.max((y - G.y0) / G.step, 0), G.ny - 1.001);
+  const i = Math.floor(fx), j = Math.floor(fy), a = fx - i, b = fy - j, h = (ii, jj) => G.h[jj * G.nx + ii];
+  return (h(i, j) * (1 - a) + h(i + 1, j) * a) * (1 - b) + (h(i, j + 1) * (1 - a) + h(i + 1, j + 1) * a) * b;
+}
+function densify(points, step) {  // sim xy polyline -> evenly spaced points
+  const out = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [ax, ay] = points[i], [bx, by] = points[i + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
+    for (let k = 0; k < n; k++) out.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n]);
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+function ribbon(points, width, lift, from = 0, to = Infinity) {  // a flat strip along the ground following the terrain
+  const pts = densify(points, 4), pos = [], idx = [];
+  let along = 0, n = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)];
+    if (i) along += Math.hypot(p[0] - o[0], p[1] - o[1]);
+    if (along < from || along > to) continue;
+    let dx = q[0] - o[0], dy = q[1] - o[1];
+    const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    const nx = -dy * width / 2, ny = dx * width / 2;
+    for (const s of [1, -1]) { const x = p[0] + s * nx, y = p[1] + s * ny; pos.push(...v(x, y, heightAt(x, y) + lift).toArray()); }
+    if (n) idx.push(2 * n - 2, 2 * n - 1, 2 * n, 2 * n - 1, 2 * n + 1, 2 * n);
+    n++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+function disc(x, y, r, lift) {
+  const g = new THREE.CircleGeometry(r, 40);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const px = x + p.getX(i), py = y + p.getY(i); p.setXYZ(i, px, heightAt(px, py) + lift, -py); }
+  g.computeVertexNormals();
+  return g;
+}
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+const merge = geos => {  // tiny merge for non-indexed or indexed geometries with position (+normal)
+  const pos = [], nor = [];
+  for (const g0 of geos) {
+    const g = g0.index ? g0.toNonIndexed() : g0;
+    if (!g.attributes.normal) g.computeVertexNormals();
+    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  return g;
+};
+
+// ---------- ground ----------
+{
+  const n = G.nx * G.ny, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), idx = [];
+  const grassA = new THREE.Color("#7f9a55"), grassB = new THREE.Color("#a3ae6a"), c = new THREE.Color();
+  const fields = ["#a9a46a", "#8c9c58", "#b5ab72", "#83975a", "#9d9d64", "#91a262"].map(x => new THREE.Color(x));
+  const pts = D.city.streets.flatMap(s => s.points), lo = [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1]))],
+    hi = [Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1]))];
+  const hash = (a, b) => { const h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return h - Math.floor(h); };
+  for (let j = 0; j < G.ny; j++) for (let i = 0; i < G.nx; i++) {
+    const k = j * G.nx + i, x = G.x0 + i * G.step, y = G.y0 + j * G.step;
+    pos.set(v(x, y, G.h[k]).toArray(), k * 3);
+    const out = Math.max(lo[0] - 60 - x, x - hi[0] - 60, lo[1] - 60 - y, y - hi[1] - 60);
+    if (out > 0) {  // farmland round the city: fields of a few crops, rows across the field
+      const fx = Math.floor((x + 37 + 40 * Math.sin(y * 0.004)) / 230), fy = Math.floor((y + 11) / 170), f = fields[Math.floor(hash(fx, fy) * fields.length)];
+      c.copy(f).multiplyScalar(0.94 + 0.06 * Math.sin((hash(fx, fy) > 0.5 ? x : y) * 0.9)).lerp(grassA, Math.max(0, 1 - out / 40) * 0.6);
+    } else c.copy(grassA).lerp(grassB, 0.5 + 0.5 * noise(x, y));
+    col.set(c.toArray(), k * 3);
+    if (i < G.nx - 1 && j < G.ny - 1) idx.push(k, k + 1, k + G.nx, k + 1, k + G.nx + 1, k + G.nx);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const ground = new THREE.Mesh(g, lambert("#ffffff", { vertexColors: true }));
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// ---------- streets: pavement, asphalt, lane dashes ----------
+{
+  const pave = [], road = [], dash = [];
+  for (const s of D.city.streets) {
+    pave.push(ribbon(s.points, s.width + 3.5, 0.18));
+    road.push(ribbon(s.points, s.width, 0.3));
+    if (s.bulb) { const [x, y] = s.points[s.points.length - 1]; pave.push(disc(x, y, s.bulb + 1.8, 0.18)); road.push(disc(x, y, s.bulb, 0.3)); }
+    if (s.kind === "arterial" || s.kind === "collector") {
+      const len = densify(s.points, 4).reduce((a, p, i, arr) => a + (i ? Math.hypot(p[0] - arr[i - 1][0], p[1] - arr[i - 1][1]) : 0), 0);
+      for (let d = 6; d < len - 6; d += 12) dash.push(ribbon(s.points, 0.35, 0.42, d, d + 5));
+    }
+  }
+  const [rc, rh] = D.city.runway;
+  pave.push(ribbon([[rc[0] - rh[0], rc[1]], [rc[0] + rh[0], rc[1]]], 2 * rh[1] + 6, 0.18));
+  road.push(ribbon([[rc[0] - rh[0], rc[1]], [rc[0] + rh[0], rc[1]]], 2 * rh[1], 0.3));
+  const add = (geos, color, shadow = true) => { const m = new THREE.Mesh(merge(geos), lambert(color)); m.receiveShadow = shadow; scene.add(m); };
+  add(pave, "#c9c3b4"); add(road, "#3f4247"); add(dash, "#e9e4d6");
+}
+
+// ---------- buildings, trees and the rest ----------
+const up = new THREE.Vector3(0, 1, 0), m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion();
+function shadedBox() {  // a unit box a little darker at its foot: cheap ambient occlusion
+  const g = new THREE.BoxGeometry(1, 1, 1), p = g.attributes.position, c = [];
+  for (let i = 0; i < p.count; i++) { const k = 0.58 + 0.42 * (p.getY(i) + 0.5); c.push(k, k, k); }
+  g.setAttribute("color", new THREE.Float32BufferAttribute(c, 3));
+  return g;
+}
+function roofPrism() {  // unit gable roof, ridge along x, base at y = 0
+  const P = [[-.5, 0, -.5], [.5, 0, -.5], [.5, 1, 0], [-.5, 1, 0], [-.5, 0, .5], [.5, 0, .5]];
+  const tri = [[0, 1, 2], [0, 2, 3], [4, 3, 2], [4, 2, 5], [0, 3, 4], [1, 5, 2]];
+  const pos = [];
+  for (const t of tri) for (const i of t) pos.push(...P[i]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+function instanced(geometry, material, items, colours) {
+  const mesh = new THREE.InstancedMesh(geometry, material, items.length);
+  items.forEach(([p, yaw, s], n) => { q4.setFromAxisAngle(up, yaw); mesh.setMatrixAt(n, m4.compose(p, q4, s)); });
+  if (colours) colours.forEach((c, n) => mesh.setColorAt(n, c));
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+const pick = list => new THREE.Color(list[Math.floor(rand() * list.length)]);
+{
+  const B = D.city.boxes, groups = {};
+  B.kind.forEach((k, i) => (groups[k] = groups[k] || []).push(i));
+  const box = shadedBox(), roof = roofPrism();
+  const wallTones = ["#efe6d6", "#e6d8c0", "#f3efe7", "#d9c7ac", "#e8dccb", "#cdb89a"];
+  const roofTones = ["#6a4a3a", "#7c3f2c", "#55606b", "#8a5a3c", "#4a5058", "#9b4d34"];
+  const flatTones = { apartment: ["#d8d4cc", "#cfc9be", "#e0dcd3"], station: ["#c2c8cf"], school: ["#d9c9a5"], hospital: ["#eef0f2"],
+    stadium: ["#c4c8cc"], airport: ["#b9c0c7"], balcony: ["#c9c2b6"], railing: ["#8a9099"], fence: ["#8d7a62", "#a08a6c"],
+    crane: ["#f2b705"], pylon: ["#7d8288"], cell_tower: ["#c9541c"] };
+  for (const kind of Object.keys(groups)) {
+    const ids = groups[kind], walls = [], wallC = [], roofs = [], roofC = [];
+    for (const i of ids) {
+      const h = Math.max(B.z1[i] - B.z0[i], 0.1);
+      if (kind === "house") {
+        const along = B.sx[i] >= B.sy[i], long = Math.max(B.sx[i], B.sy[i]), short = Math.min(B.sx[i], B.sy[i]);
+        const rh = Math.min(0.42 * short, h * 0.4), yaw = B.yaw[i] + (along ? 0 : Math.PI / 2);
+        walls.push([v(B.x[i], B.y[i], B.z0[i] + (h - rh) / 2), B.yaw[i], new THREE.Vector3(B.sx[i], h - rh, B.sy[i])]);
+        roofs.push([v(B.x[i], B.y[i], B.z1[i] - rh), yaw, new THREE.Vector3(long + 0.6, rh, short + 0.8)]);
+        wallC.push(pick(wallTones)); roofC.push(pick(roofTones));
+      } else {
+        walls.push([v(B.x[i], B.y[i], (B.z0[i] + B.z1[i]) / 2), B.yaw[i], new THREE.Vector3(Math.max(B.sx[i], 0.08), h, Math.max(B.sy[i], 0.08))]);
+        wallC.push(pick(flatTones[kind] || ["#b0b0b0"]));
+      }
+    }
+    instanced(box, lambert("#ffffff", { vertexColors: true }), walls, wallC);
+    if (roofs.length) instanced(roof, lambert("#ffffff"), roofs, roofC);
+  }
+  const Y = D.city.cyl, trunks = [], crowns = [], crownC = [], poles = [], poleC = [];
+  const greens = ["#4f7d3a", "#5e8c42", "#3f6b33", "#6b9447", "#577f3e"];
+  Y.kind.forEach((k, i) => {
+    const h = Y.z1[i] - Y.z0[i], p = v(Y.x[i], Y.y[i], (Y.z0[i] + Y.z1[i]) / 2);
+    if (k === "canopy") { crowns.push([p, rand() * 6, new THREE.Vector3(Y.r[i] * 1.05, h * 0.55, Y.r[i] * 1.05)]); crownC.push(pick(greens)); }
+    else if (k === "trunk") trunks.push([p, 0, new THREE.Vector3(Math.max(Y.r[i], 0.18), h, Math.max(Y.r[i], 0.18))]);
+    else { poles.push([p, 0, new THREE.Vector3(Y.r[i], h, Y.r[i])]); poleC.push(new THREE.Color(k === "cell_tower" ? "#c9541c" : "#6d6f72")); }
+  });
+  instanced(new THREE.CylinderGeometry(1, 1, 1, 6), lambert("#5a4332"), trunks);
+  instanced(new THREE.IcosahedronGeometry(1, 1), lambert("#ffffff", { flatShading: true }), crowns, crownC);
+  if (poles.length) instanced(new THREE.CylinderGeometry(1, 1, 1, 8), lambert("#ffffff"), poles, poleC);
+  const W = D.city.wires, pos = [];
+  W.kind.forEach((k, i) => pos.push(...v(...W.p[i]).toArray(), ...v(...W.q[i]).toArray()));
+  scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(
+    Array.from({ length: pos.length / 3 }, (_, i) => new THREE.Vector3(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]))),
+    new THREE.LineBasicMaterial({ color: "#2b2d30", transparent: true, opacity: 0.75 })));
+}
+
+// ---------- no-fly zones: thin outlines ----------
+if (SHOT.zones !== false) for (const z of D.city.zones) {
+  if (z.ceiling - z.floor <= 0 || !z.active) continue;
+  const ring = [];
+  if (z.shape === "circle") for (let k = 0; k <= 96; k++) { const a = k / 96 * 2 * Math.PI; ring.push([z.centre[0] + z.radius * Math.cos(a), z.centre[1] + z.radius * Math.sin(a)]); }
+  else { const c = Math.cos(z.yaw), s = Math.sin(z.yaw), [hx, hy] = z.half;
+    for (const [a, b] of [[1, 1], [-1, 1], [-1, -1], [1, -1], [1, 1]]) ring.push([z.centre[0] + a * hx * c - b * hy * s, z.centre[1] + a * hx * s + b * hy * c]); }
+  const lo = z.ground + z.floor, hi = z.ground + z.ceiling, mat = new THREE.LineBasicMaterial({ color: "#e0483e", transparent: true, opacity: 0.7 });
+  for (const h of [lo + 1, hi]) scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ring.map(p => v(p[0], p[1], h))), mat));
+}
+
+// ---------- the plan and the moment ----------
+function polyline(points) {
+  const pts = points.map(p => p.length === 3 ? v(p[0], p[1], p[2]) : v(p[0], p[1], heightAt(p[0], p[1]) + 3));
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  return { pts, cum, len: cum[cum.length - 1] };
+}
+function along(line, f, out = new THREE.Vector3()) {
+  if (line.pts.length === 1 || !line.len) return out.copy(line.pts[0]);
+  const d = Math.min(Math.max(f, 0), 1) * line.len;
+  let i = 1;
+  while (i < line.cum.length - 1 && line.cum[i] < d) i++;
+  return out.lerpVectors(line.pts[i - 1], line.pts[i], (d - line.cum[i - 1]) / ((line.cum[i] - line.cum[i - 1]) || 1));
+}
+const legs = D.legs.map(l => ({ ...l, line: polyline(l.xy) }));
+const flights = D.flights.map(f => ({ ...f, line: polyline(f.path), spotV: v(...f.spot) }));
+function truckAt(k, t) {
+  const L = legs.filter(l => l.truck === k).sort((a, b) => a.t0 - b.t0);
+  let out = along(L[0].line, 0), heading = 0;
+  for (const l of L) {
+    if (t < l.t0) break;
+    const f = Math.min((t - l.t0) / Math.max(l.t1 - l.t0, 1e-6), 1);
+    out = along(l.line, f);
+    const ahead = along(l.line, Math.min(f + 0.02, 1)), behind = along(l.line, Math.max(f - 0.02, 0));
+    if (ahead.distanceTo(behind) > 0.5) heading = Math.atan2(-(ahead.z - behind.z), ahead.x - behind.x);
+  }
+  return { p: out, heading };
+}
+function droneAt(f, t) {
+  const arrive = f.t1 - f.over;
+  if (t <= arrive) return along(f.line, (t - f.t0) / Math.max(arrive - f.t0, 1e-6));
+  if (t <= f.t1) {
+    const p = along(f.line, 1);
+    return f.mode === "set" ? p.lerp(f.spotV.clone().setY(f.spotV.y + 1.0), Math.min((t - arrive) / (f.over * 0.5), 1)) : p;
+  }
+  return along(f.line, 1 - (t - f.t1) / Math.max(f.t2 - f.t1, 1e-6));
+}
+// Pick the moment and the place the shot is about.
+const mine = x => SHOT.truck == null || x.truck === SHOT.truck;
+const T = SHOT.time ?? (() => {  // the busiest moment: drones in the air (counted once they're well clear of the truck) and people walking over
+  let best = -1, bt = D.start;
+  for (let t = D.start; t < D.start + 5; t += 1 / 240) {
+    const n = flights.filter(f => mine(f) && f.t0 + 0.4 * (f.t1 - f.t0) <= t && t <= f.t2 - 0.4 * (f.t2 - f.t1)).length * (SHOT.weightDrones ?? 1)
+      + D.walkers.filter(w => mine(w) && w.t0 <= t && t <= w.t1).length * (SHOT.weightPeople ?? 0);
+    if (n > best) { best = n; bt = t; }
+  }
+  return bt;
+})();
+const aloft = flights.filter(f => f.t0 <= T && T <= f.t2);
+
+// Route ribbons: morning solid, the afternoon second pass dashed.
+const routeMat = k => new THREE.MeshBasicMaterial({ color: TRUCK[k % TRUCK.length], transparent: true, opacity: SHOT.routeOpacity ?? 0.9, depthWrite: false });
+for (const l of legs) {
+  if (SHOT.routes === false || (SHOT.secondOnly && !l.second)) continue;
+  const w = SHOT.routeWidth || 5;
+  if (!l.second) scene.add(new THREE.Mesh(ribbon(l.xy, w, 1.2), routeMat(l.truck)));
+  else { const len = l.line.len; for (let d = 0; d < len; d += 22) scene.add(new THREE.Mesh(ribbon(l.xy, w, 1.25, d, d + 12), routeMat(l.truck))); }
+}
+// Flight arcs: every flight the shot asks for, as a tube following its planned height profile.
+const arcs = SHOT.arcs === "all" ? flights.filter(f => !f.second) : SHOT.arcs === "aloft" ? aloft : SHOT.arcs === "second" ? flights.filter(f => f.second) : [];
+for (const f of arcs) {
+  const curve = new THREE.CatmullRomCurve3(f.line.pts);
+  const c = new THREE.Color(TRUCK[f.truck % TRUCK.length]).lerp(new THREE.Color("#ffffff"), 0.12);
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, f.line.pts.length * 3), SHOT.arcWidth || 0.7, 5, false),
+    new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: SHOT.arcOpacity ?? 0.7, depthWrite: false })));
+}
+// Drones: body, arms, rotors. Drawn SHOT.droneScale times life size so they show at the shot's distance.
+const droneGeo = merge([new THREE.BoxGeometry(0.5, 0.18, 0.5), new THREE.BoxGeometry(1.5, 0.06, 0.08).rotateY(Math.PI / 4),
+  new THREE.BoxGeometry(1.5, 0.06, 0.08).rotateY(-Math.PI / 4), new THREE.BoxGeometry(0.34, 0.24, 0.34).translate(0, -0.2, 0)]);
+const rotorGeo = merge([[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) => new THREE.CylinderGeometry(0.3, 0.3, 0.02, 20).translate(a * 0.53, 0.06, b * 0.53)));
+{
+  const s = SHOT.droneScale || 1;
+  for (const f of aloft) {
+    const p = droneAt(f, T), g = new THREE.Group();
+    const body = new THREE.Mesh(droneGeo, lambert(TRUCK[f.truck % TRUCK.length], { emissive: TRUCK[f.truck % TRUCK.length], emissiveIntensity: 0.35 }));
+    const rotors = new THREE.Mesh(rotorGeo, new THREE.MeshBasicMaterial({ color: "#1c1f24", transparent: true, opacity: 0.55 }));
+    body.castShadow = true;
+    g.add(body, rotors);
+    g.position.copy(p);
+    g.scale.setScalar(s);
+    scene.add(g);
+    if (T > f.t1 - f.over && T <= f.t1 && f.mode === "lower") {  // the parcel on its line
+      const reach = Math.min((T - (f.t1 - f.over)) / (f.over * 0.6), 1), bottom = p.clone().lerp(f.spotV, reach);
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.03 * s, 0.03 * s, p.distanceTo(bottom), 6), lambert("#26282c"));
+      cord.position.copy(p).lerp(bottom, 0.5);
+      scene.add(cord);
+      const parcel = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 0.32 * s, 0.35 * s), lambert("#b8875a"));
+      parcel.position.copy(bottom).y += 0.16 * s;
+      parcel.castShadow = true;
+      scene.add(parcel);
+    }
+  }
+}
+// Trucks: a white box body with the truck's colour along it, a cab and wheels.
+const trucks = [];
+for (let k = 0; k < D.trucks; k++) {
+  const { p, heading } = truckAt(k, T), g = new THREE.Group(), c = TRUCK[k % TRUCK.length];
+  const part = (geo, color, x, y, z) => { const m = new THREE.Mesh(geo, lambert(color)); m.position.set(x, y, z); m.castShadow = true; g.add(m); };
+  part(new THREE.BoxGeometry(7.2, 3.0, 2.5), "#f4f5f6", -0.9, 2.2, 0);
+  part(new THREE.BoxGeometry(7.25, 0.5, 2.55), c, -0.9, 1.25, 0);
+  part(new THREE.BoxGeometry(2.0, 2.3, 2.4), "#2e3440", 3.6, 1.75, 0);
+  part(new THREE.BoxGeometry(7.0, 0.12, 2.3), c, -0.9, 3.76, 0);  // landing pad on the roof
+  for (const x of [-3.4, -1.9, 3.4]) for (const z of [-1.15, 1.15]) part(new THREE.CylinderGeometry(0.5, 0.5, 0.35, 16).rotateX(Math.PI / 2), "#1d1f22", x, 0.5, z);
+  g.position.copy(p).setY(p.y - 3 + 0.1);
+  g.rotation.y = heading;
+  g.scale.setScalar(SHOT.truckScale || 1);
+  scene.add(g);
+  trucks.push({ g, p });
+}
+// People walking over to the locker, and parcels delivered so far at their doors.
+if (SHOT.people !== false) {
+  const ps = D.walkers.filter(w => w.t0 <= T && T <= w.t1 + 1 / 60);
+  const items = ps.map(w => {
+    const f = Math.min((T - w.t0) / Math.max(w.t1 - w.t0, 1e-6), 1), x = w.from[0] + (w.to[0] - w.from[0]) * f, y = w.from[1] + (w.to[1] - w.from[1]) * f;
+    return [v(x, y, heightAt(x, y) + 0.9 * (SHOT.personScale || 1)), 0, new THREE.Vector3(1, 1, 1).multiplyScalar(SHOT.personScale || 1)];
+  });
+  if (items.length) instanced(new THREE.CapsuleGeometry(0.28, 1.1, 3, 8), lambert("#ffffff"), items, items.map(() => pick(["#2f6fde", "#3b82f6", "#1d4ed8", "#e11d48", "#f59e0b", "#0f766e"])));
+}
+if (SHOT.parcels) {
+  const P = D.parcels, items = [], cols = [];
+  P.t.forEach((at, i) => { if (at !== null && at <= T) { items.push([v(P.x[i], P.y[i], P.z[i] + 0.25), 0, new THREE.Vector3(0.6, 0.45, 0.5)]); cols.push(new THREE.Color("#c49a6c")); } });
+  if (items.length) instanced(new THREE.BoxGeometry(1, 1, 1), lambert("#ffffff"), items, cols);
+}
+
+// ---------- camera ----------
+const camera = new THREE.PerspectiveCamera(SHOT.fov || 32, innerWidth / innerHeight, 1, 30000);
+let target;
+if (SHOT.focus === "truck") {  // the truck and its drones in the air, together
+  const pts = [trucks[SHOT.truck || 0].p, ...aloft.filter(mine).map(f => droneAt(f, T))];
+  target = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(pts.length).lerp(trucks[SHOT.truck || 0].p, 0.35);
+}
+else if (SHOT.focus === "drop") {  // the balcony and the drone above it; render3d/__main__.py aims the camera at the facade
+  const f = aloft.find(f => f.parcel === SHOT.parcel) || aloft[0];
+  target = f.spotV.clone().lerp(droneAt(f, T), 0.45);
+} else {
+  const [tx, ty] = SHOT.target || [G.x0 + G.nx * G.step * 0.5, G.y0 + G.ny * G.step * 0.5];
+  target = v(tx, ty, heightAt(tx, ty) + (SHOT.targetHeight ?? 0));
+}
+const [ox, oy, oz] = SHOT.offset || [-700, -1150, 820];
+camera.position.copy(target).add(v(ox, oy, oz));
+camera.lookAt(target);
+// Sun low in the west-southwest for long shadows, with the shadow box around what's in view.
+const [sx, sy, sz] = SHOT.sun || [-900, -500, 520];
+sun.position.copy(target).add(v(sx, sy, sz));
+sun.target.position.copy(target);
+const reach = SHOT.shadowReach || 1100, sc = sun.shadow.camera;
+sc.left = sc.bottom = -reach; sc.right = sc.top = reach; sc.near = 10; sc.far = 6000;
+sc.updateProjectionMatrix();
+
+// ---------- caption and legend ----------
+function show(id, html) { const el = document.getElementById(id); el.innerHTML = html; el.hidden = false; }
+const st = D.stats, fill = s => s.replace(/\{(\w+)\}/g, (_, k) => ({
+  time: clock(T), city: D.seed, day: D.day, aloft: aloft.filter(f => SHOT.truck == null || f.truck === SHOT.truck).length, delivered: Math.round(st.delivered * 100),
+  bydrone: Math.round(st.by_drone * 100), last: st.last ? clock(st.last) : "none", trucks: D.trucks,
+  walking: D.walkers.filter(w => w.t0 <= T && T <= w.t1 && (SHOT.truck == null || w.truck === SHOT.truck)).length,
+  done: D.parcels.t.filter(x => x !== null && x <= T).length }[k] ?? k));
+if (SHOT.caption) show("caption", `<div class="eyebrow">${fill(SHOT.caption.eyebrow || "")}</div><div class="title">${fill(SHOT.caption.title)}</div>`
+  + (SHOT.caption.line ? `<div class="line">${fill(SHOT.caption.line)}</div>` : "")
+  + (SHOT.caption.stats ? `<div class="stats">${SHOT.caption.stats.map(s => `<span>${fill(s)}</span>`).join("")}</div>` : ""));
+if (SHOT.legend) show("legend", SHOT.legend.map(([kind, colour, text]) =>
+  `<div><i class="${kind === "dot" ? "dot" : ""}" style="background:${colour}${kind === "dash" ? ";background:repeating-linear-gradient(90deg," + colour + " 0 6px,transparent 6px 10px)" : ""}"></i>${text}</div>`).join(""));
+
+function draw() {  // size to the window as it is now; headless Chrome settles its size after load
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+}
+addEventListener("resize", draw);
+draw();
+requestAnimationFrame(() => { draw(); setTimeout(() => { draw(); document.title = "ready"; }, 200); });
+})();
+</script>
+</body>
+</html>

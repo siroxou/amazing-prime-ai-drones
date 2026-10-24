@@ -2,5 +2,6 @@ numpy>=1.26
 gymnasium>=0.29
 pytest>=8.0
 matplotlib>=3.8
+pillow>=10.0
 ortools>=9.10
 scipy>=1.11
