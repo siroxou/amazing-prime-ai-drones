@@ -1,5 +1,7 @@
 # Amazing Prime AI Drones
 
+[![tests](https://github.com/siroxou/amazing-prime-ai-drones/actions/workflows/tests.yml/badge.svg)](https://github.com/siroxou/amazing-prime-ai-drones/actions/workflows/tests.yml)
+
 Can a fleet of autonomous trucks, each launching 10 delivery drones, deliver a city's parcels faster than Amazon does today?
 
 ![A simulated city from above at low sun, with two driverless trucks' routes in orange and purple and every drone flight of the morning fanning out from the trucks' stops at cruise height](docs/images/3d-hero.jpg)
